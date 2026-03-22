@@ -1,0 +1,7 @@
+{
+  "name": "librus-client",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular"
+}
