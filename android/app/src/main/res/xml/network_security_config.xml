@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Librus bywa przekierowywany na http:// na domenach *.librus.pl (błędna konfiguracja serwera / proxy).
+  WebView na Androidzie 9+ blokuje cleartext (ERR_CLEARTEXT_NOT_PERMITTED) — ta polityka pozwala
+  tylko na wybrane hosty; w aplikacji i tak wymuszamy https:// tam, gdzie generujemy URL (librus-auth).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">librus.pl</domain>
+    </domain-config>
+</network-security-config>

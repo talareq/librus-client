@@ -1,9 +1,17 @@
-import type { CapacitorConfig } from '@capacitor/cli';
+import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'io.ionic.starter',
+  appId: 'com.twojadomena.librus',
   appName: 'librus-client',
-  webDir: 'www'
+  webDir: 'www',
+  plugins: {
+    CapacitorHttp: {
+      enabled: true,
+    },
+    CapacitorCookies: {
+      enabled: true, // TO JEST KLUCZ: Android zapamięta teraz sesję
+    }
+  },
 };
 
 export default config;

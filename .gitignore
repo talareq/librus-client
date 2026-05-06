@@ -28,6 +28,8 @@ log.txt
 /tmp
 /out-tsc
 /bazel-out
+*.tsbuildinfo
+.eslintcache
 
 # Node
 /node_modules
@@ -68,3 +70,39 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+
+# --- Secrets & local environment (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Capacitor / native tooling ---
+.capacitor/
+
+# --- Backup / merge artifacts ---
+*.orig
+*.bak
+*.rej
+
+# --- Signing & distribution (credentials) ---
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+google-services.json
+GoogleService-Info.plist
+
+# --- Optional IDE / toolchain noise ---
+*.code-workspace.local
+.atom/
+fleet/
+
+# Uncomment if you do not commit local Cursor/AI project state:
+# .cursor/
+# *.cursor-workspace
+
+# --- Package manager (keep lockfiles committed; uncomment if needed) ---
+# package-lock.json
+# yarn.lock

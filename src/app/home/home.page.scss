@@ -1,27 +1,588 @@
-#container {
-  text-align: center;
+ion-header {
+  ion-toolbar {
+    --background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --color: white;
+    
+    ion-title {
+      font-weight: 700;
+      font-size: 1.3em;
+      letter-spacing: 0.5px;
+    }
 
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+    ion-button {
+      --color: white;
+    }
+  }
 }
 
-#container strong {
-  font-size: 20px;
-  line-height: 26px;
+.status-toolbar {
+  --background: white;
+  padding: 8px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+
+  ion-chip {
+    font-weight: 600;
+    
+    &[color="success"] {
+      --background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      --color: white;
+    }
+    
+    &[color="warning"] {
+      --background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      --color: white;
+    }
+  }
+
+  ion-button {
+    --border-radius: 20px;
+    font-weight: 600;
+    
+    &[color="primary"] {
+      --background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+  }
 }
 
-#container p {
-  font-size: 16px;
-  line-height: 22px;
+ion-content {
+  --background: #f8f9fa;
+}
 
-  color: #8c8c8c;
+.status-card {
+  margin: 16px;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  background: white;
+  
+  ion-card-content {
+    padding: 20px;
+    
+    p {
+      margin: 0;
+      font-size: 0.95em;
+      line-height: 1.5;
+    }
+  }
+}
 
+// Piękne taby
+ion-segment {
+  margin: 16px;
+  padding: 4px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  
+  ion-segment-button {
+    max-width: none;
+    flex-shrink: 0;
+
+    --indicator-color: transparent;
+    --color: #6c757d;
+    --color-checked: white;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.72em;
+    min-height: 48px;
+    margin: 2px;
+    position: relative;
+    
+    &::part(indicator-background) {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+    }
+    
+    ion-label {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    ion-badge {
+      margin-left: 4px;
+      min-width: 20px;
+      height: 20px;
+      font-size: 0.7em;
+      font-weight: 700;
+    }
+  }
+}
+
+// Content sections
+.section-content {
+  padding: 0 16px 16px;
+}
+
+// Listy
+ion-list {
+  background: transparent;
+  padding: 0;
+  
+  ion-item-group {
+    margin-bottom: 16px;
+    background: white;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    
+    ion-item-divider {
+      --background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+      --color: #495057;
+      font-weight: 700;
+      font-size: 1em;
+      padding: 16px 20px;
+      border-bottom: 2px solid #dee2e6;
+    }
+    
+    ion-item {
+      --padding-start: 20px;
+      --padding-end: 20px;
+      --min-height: 80px;
+      --background: white;
+      
+      &.unread {
+        --background: #f0f8ff;
+        border-left: 4px solid #667eea;
+      }
+    }
+  }
+}
+
+// Chips dla ocen
+ion-chip {
+  margin: 8px 8px 8px 0;
+  height: 48px;
+  min-width: 48px;
+  font-size: 1.1em;
+  font-weight: 700;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:active {
+    transform: scale(0.95);
+  }
+  
+  ion-icon[name="star"] {
+    margin-left: 4px;
+  }
+}
+
+// Karty
+ion-card {
+  margin: 16px;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  overflow: hidden;
+  
+  ion-card-header {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 20px;
+    
+    ion-card-title {
+      font-weight: 700;
+      font-size: 1.2em;
+      color: #212529;
+      margin-bottom: 8px;
+      
+      ion-badge {
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+    }
+    
+    ion-card-subtitle {
+      color: #6c757d;
+      font-size: 0.9em;
+      margin-top: 4px;
+    }
+  }
+  
+  ion-card-content {
+    padding: 20px;
+    
+    p {
+      line-height: 1.6;
+      color: #495057;
+    }
+  }
+}
+
+// Empty states
+.empty-state {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  
+  ion-card-content {
+    padding: 40px 20px;
+    text-align: center;
+    
+    ion-icon {
+      font-size: 64px;
+      color: #dee2e6;
+      margin-bottom: 16px;
+    }
+    
+    p {
+      color: #6c757d;
+      font-size: 1em;
+      margin: 0;
+    }
+  }
+}
+
+.calendar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.calendar-card {
   margin: 0;
+
+  ion-card-content {
+    padding: 16px;
+  }
 }
 
-#container a {
-  text-decoration: none;
+.calendar-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+
+  > ion-icon {
+    flex: 0 0 auto;
+    margin-top: 3px;
+    font-size: 24px;
+  }
+}
+
+.calendar-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.calendar-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+
+  h2 {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    color: #212529;
+    font-size: 0.98rem;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  ion-badge {
+    flex: 0 0 auto;
+  }
+}
+
+.calendar-description {
+  margin: 8px 0 0;
+  color: #6c757d;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.calendar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.calendar-toolbar-month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  .calendar-month-heading {
+    flex: 1;
+    text-align: center;
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #212529;
+  }
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.calendar-grid-month {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.calendar-cell {
+  aspect-ratio: 1;
+  max-height: 52px;
+  border: none;
+  border-radius: 10px;
+  background: #f1f3f5;
+  color: #212529;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+.calendar-cell-muted {
+  opacity: 0.38;
+}
+
+.calendar-cell-has-events {
+  background: linear-gradient(145deg, #e7ecff 0%, #dfe8ff 100%);
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.35);
+}
+
+.calendar-cell-day {
+  line-height: 1.2;
+}
+
+.calendar-cell-dots {
+  display: flex;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.calendar-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #667eea;
+}
+
+.calendar-subheading {
+  margin: 16px 0 10px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #495057;
+}
+
+.calendar-agenda-list {
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  margin-bottom: 8px;
+
+  ion-item {
+    --padding-start: 12px;
+    --inner-padding-end: 12px;
+  }
+
+  ion-label h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  ion-label p {
+    margin-top: 4px;
+    font-size: 0.82rem;
+    color: #6c757d;
+  }
+}
+
+.calendar-detail-card {
+  margin: 16px;
+
+  ion-card-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+
+  ion-card-subtitle {
+    text-transform: none;
+    font-size: 0.95rem;
+    color: #667eea;
+    margin-bottom: 8px;
+  }
+}
+
+// Modal
+ion-modal {
+  --border-radius: 24px;
+  --box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  
+  ion-toolbar {
+    --background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --color: white;
+    
+    ion-title {
+      font-weight: 700;
+    }
+  }
+  
+  ion-content {
+    --background: #f8f9fa;
+  }
+  
+  .grade-details-card {
+    margin: 16px;
+    
+    ion-card-header {
+      text-align: center;
+      padding: 32px 20px 20px;
+      
+      ion-badge {
+        font-size: 2.5em;
+        padding: 16px 24px;
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      }
+      
+      ion-card-subtitle {
+        margin-top: 16px;
+        font-size: 1.1em;
+        font-weight: 600;
+      }
+    }
+    
+    ion-list {
+      background: white;
+      border-radius: 16px;
+      
+      ion-item {
+        --padding-start: 16px;
+        --padding-end: 16px;
+        --min-height: 60px;
+        
+        ion-icon {
+          font-size: 24px;
+          margin-right: 16px;
+        }
+        
+        h3 {
+          font-weight: 700;
+          color: #495057;
+          margin-bottom: 4px;
+          font-size: 0.9em;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        
+        p {
+          color: #212529;
+          font-size: 1em;
+          margin: 0;
+        }
+      }
+    }
+  }
+  
+  ion-button {
+    margin: 16px;
+    --border-radius: 16px;
+    height: 52px;
+    font-weight: 700;
+    font-size: 1em;
+    --background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  }
+}
+
+// Badges
+ion-badge {
+  &[color="danger"] {
+    --background: #ff6b6b;
+    font-weight: 700;
+  }
+  
+  &[color="warning"] {
+    --background: #ffd93d;
+    --color: #495057;
+    font-weight: 700;
+  }
+  
+  &[color="primary"] {
+    --background: #667eea;
+    font-weight: 700;
+  }
+  
+  &[color="success"] {
+    --background: #51cf66;
+    font-weight: 700;
+  }
+}
+
+// Notes i items
+ion-note {
+  color: #6c757d;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+// Animations
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+ion-item-group {
+  animation: fadeInUp 0.3s ease;
+}
+
+ion-card {
+  animation: fadeInUp 0.3s ease;
+}
+
+// Loading spinner
+ion-spinner {
+  --color: white;
+}
+
+// Scrollbar (webkit only)
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #667eea;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #764ba2;
 }

@@ -1,20 +1,536 @@
 <ion-header [translucent]="true">
   <ion-toolbar>
-    <ion-title>
-      Blank
-    </ion-title>
+    <ion-title>Librus Client</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="debugCookies()">
+        <ion-icon name="bug-outline" slot="icon-only"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+  
+  <!-- Status bar -->
+  <ion-toolbar class="status-toolbar">
+    <ion-chip [color]="isLoading ? 'primary' : (hasSession ? 'success' : 'warning')" size="small">
+      <ion-icon [name]="isLoading ? 'sync' : (hasSession ? 'shield-checkmark' : 'alert-circle')"></ion-icon>
+      <ion-label>{{ isLoading ? 'Synchronizacja…' : (hasSession ? 'Sesja OK' : 'Brak sesji') }}</ion-label>
+    </ion-chip>
+    
+    <ion-buttons slot="end">
+      <ion-button (click)="syncAll()" [disabled]="isLoading" fill="solid" color="primary">
+        <ion-icon name="refresh" slot="start"></ion-icon>
+        <span *ngIf="!isLoading">Sync</span>
+        <ion-spinner *ngIf="isLoading" name="crescent"></ion-spinner>
+      </ion-button>
+      
+      <ion-button *ngIf="hasSession" (click)="wyloguj()" color="danger" fill="outline">
+        <ion-icon name="log-out-outline" slot="icon-only"></ion-icon>
+      </ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
 <ion-content [fullscreen]="true">
-  <ion-header collapse="condense">
-    <ion-toolbar>
-      <ion-title size="large">Blank</ion-title>
-    </ion-toolbar>
-  </ion-header>
+  
+  <!-- Status message -->
+  <ion-card *ngIf="wynik" class="status-card">
+    <ion-card-content>
+      <p [style.color]="wynik.includes('Błąd') ? '#ff6b6b' : '#495057'">
+        <ion-icon 
+          [name]="wynik.includes('Błąd') ? 'alert-circle' : wynik.includes('Sukces') || wynik.includes('Znaleziono') ? 'checkmark-circle' : 'information-circle'"
+          style="vertical-align: middle; margin-right: 8px;">
+        </ion-icon>
+        {{ wynik }}
+      </p>
+    </ion-card-content>
+  </ion-card>
 
-  <div id="container">
-    <strong>Ready to create an app?</strong>
-    <p>Start with Ionic <a target="_blank" rel="noopener noreferrer" href="https://ionicframework.com/docs/components">UI Components</a></p>
+  <!-- Tabs -->
+  <ion-segment [(ngModel)]="selectedTab" (ionChange)="selectTab(selectedTab)" mode="ios" [scrollable]="true">
+    <ion-segment-button value="grades">
+      <ion-label>
+        <ion-icon name="school-outline"></ion-icon>
+        <span>Oceny</span>
+        <ion-badge *ngIf="newCounts.grades > 0" color="danger">{{ newCounts.grades }}</ion-badge>
+      </ion-label>
+    </ion-segment-button>
+    
+    <ion-segment-button value="messages">
+      <ion-label>
+        <ion-icon name="mail-outline"></ion-icon>
+        <span>Wiadomości</span>
+        <ion-badge *ngIf="newCounts.messages > 0" color="danger">{{ newCounts.messages }}</ion-badge>
+      </ion-label>
+    </ion-segment-button>
+    
+    <ion-segment-button value="notes">
+      <ion-label>
+        <ion-icon name="document-text-outline"></ion-icon>
+        <span>Uwagi</span>
+        <ion-badge *ngIf="newCounts.notes > 0" color="danger">{{ newCounts.notes }}</ion-badge>
+      </ion-label>
+    </ion-segment-button>
+    
+    <ion-segment-button value="announcements">
+      <ion-label>
+        <ion-icon name="megaphone-outline"></ion-icon>
+        <span>Ogłoszenia</span>
+        <ion-badge *ngIf="newCounts.announcements > 0" color="danger">{{ newCounts.announcements }}</ion-badge>
+      </ion-label>
+    </ion-segment-button>
+    
+    <ion-segment-button value="calendar">
+      <ion-label>
+        <ion-icon name="calendar-outline"></ion-icon>
+        <span>Terminarz</span>
+        <ion-badge *ngIf="newCounts.calendar > 0" color="danger">{{ newCounts.calendar }}</ion-badge>
+      </ion-label>
+    </ion-segment-button>
+  </ion-segment>
+
+  <!-- OCENY TAB -->
+  <div *ngIf="selectedTab === 'grades'" class="section-content">
+    <ion-list *ngIf="gradesSemesterSections.length > 0">
+      <ng-container *ngFor="let sem of gradesSemesterSections">
+        <ion-item-divider sticky>
+          <ion-label>{{ sem.label }}</ion-label>
+        </ion-item-divider>
+
+        <ion-item *ngIf="sem.subjects.length === 0" lines="none" class="semester-empty-hint">
+          <ion-label color="medium" class="ion-text-wrap">
+            Brak ocen w tym semestrze (wg dat z Librusa).
+          </ion-label>
+        </ion-item>
+
+        <ion-item-group *ngFor="let subjectGrades of sem.subjects">
+          <ion-item-divider>
+            <ion-label>{{ subjectGrades.subject }}</ion-label>
+          </ion-item-divider>
+
+          <ion-item lines="none">
+            <div style="display: flex; flex-wrap: wrap; width: 100%; padding: 8px 0;">
+              <ion-chip
+                *ngFor="let grade of subjectGrades.grades"
+                [color]="getGradeColor(grade.value)"
+                (click)="openGradeDetails(grade)">
+                <ion-label>{{ grade.value }}</ion-label>
+                <ion-icon *ngIf="grade.isNew" name="star" color="warning"></ion-icon>
+              </ion-chip>
+            </div>
+          </ion-item>
+        </ion-item-group>
+      </ng-container>
+    </ion-list>
+    
+    <ion-card *ngIf="grades.length === 0" class="empty-state">
+      <ion-card-content>
+        <ion-icon name="school-outline"></ion-icon>
+        <p>Brak ocen</p>
+        <p style="font-size: 0.9em; margin-top: 8px;">Kliknij "Sync" aby pobrać dane</p>
+      </ion-card-content>
+    </ion-card>
   </div>
+
+  <!-- WIADOMOŚCI TAB -->
+  <div *ngIf="selectedTab === 'messages'" class="section-content">
+    <ion-list *ngIf="messages.length > 0">
+      <ion-item-group>
+        <ion-item *ngFor="let message of messages" [class.unread]="!message.isRead" button detail (click)="openMessageDetail(message)">
+          <ion-label>
+            <h2 style="font-weight: 600; color: #212529; margin-bottom: 8px;">
+              {{ message.subject }}
+              <ion-badge *ngIf="message.isNew" color="danger" style="margin-left: 8px; font-size: 0.7em;">NOWE</ion-badge>
+              <ion-icon *ngIf="message.hasAttachment" name="attach-outline" style="vertical-align: middle; margin-left: 8px; color: #868e96; font-size: 1rem;" aria-label="Załącznik"></ion-icon>
+            </h2>
+            <p style="color: #6c757d; margin-bottom: 4px;">
+              <ion-icon name="person-outline" style="vertical-align: middle; margin-right: 4px;"></ion-icon>
+              {{ message.sender }}
+            </p>
+            <p *ngIf="message.preview" style="color: #868e96; font-size: 0.9em;">{{ message.preview }}</p>
+          </ion-label>
+          <ion-note slot="end">{{ message.date }}</ion-note>
+        </ion-item>
+      </ion-item-group>
+    </ion-list>
+    
+    <ion-card *ngIf="messages.length === 0" class="empty-state">
+      <ion-card-content>
+        <ion-icon name="mail-outline"></ion-icon>
+        <p>Brak wiadomości</p>
+        <p style="font-size: 0.9em; margin-top: 8px;">Kliknij "Sync" aby pobrać dane</p>
+      </ion-card-content>
+    </ion-card>
+  </div>
+
+  <!-- UWAGI TAB -->
+  <div *ngIf="selectedTab === 'notes'" class="section-content">
+    <ion-list *ngIf="notes.length > 0">
+      <ion-item-group>
+        <ion-item *ngFor="let note of notes" button>
+          <ion-label class="ion-text-wrap">
+            <h2 style="font-weight: 600; color: #212529; margin-bottom: 8px;">
+              {{ note.content }}
+              <ion-badge *ngIf="note.isNew" color="danger" style="margin-left: 8px; font-size: 0.7em;">NOWE</ion-badge>
+            </h2>
+            <p style="color: #6c757d;">
+              <ion-icon name="person-outline" style="vertical-align: middle; margin-right: 4px;"></ion-icon>
+              {{ note.teacher }}
+            </p>
+            <p *ngIf="note.category" style="color: #868e96; font-size: 0.9em;">
+              <ion-badge color="primary">{{ note.category }}</ion-badge>
+            </p>
+          </ion-label>
+          <ion-note slot="end">{{ note.date }}</ion-note>
+        </ion-item>
+      </ion-item-group>
+    </ion-list>
+    
+    <ion-card *ngIf="notes.length === 0" class="empty-state">
+      <ion-card-content>
+        <ion-icon name="document-text-outline"></ion-icon>
+        <p>Brak uwag</p>
+        <p style="font-size: 0.9em; margin-top: 8px;">Kliknij "Sync" aby pobrać dane</p>
+      </ion-card-content>
+    </ion-card>
+  </div>
+
+  <!-- OGŁOSZENIA TAB -->
+  <div *ngIf="selectedTab === 'announcements'" class="section-content">
+    <ion-card *ngFor="let announcement of announcements">
+      <ion-card-header>
+        <ion-card-title>
+          <ion-icon name="megaphone" style="vertical-align: middle; margin-right: 8px; color: #667eea;"></ion-icon>
+          {{ announcement.title }}
+          <ion-badge *ngIf="announcement.isNew" color="danger">NOWE</ion-badge>
+        </ion-card-title>
+        <ion-card-subtitle>
+          <ion-icon name="person" style="vertical-align: middle; margin-right: 4px;"></ion-icon>
+          {{ announcement.author }} 
+          <ion-icon name="time" style="vertical-align: middle; margin: 0 4px 0 12px;"></ion-icon>
+          {{ announcement.date }}
+        </ion-card-subtitle>
+      </ion-card-header>
+      <ion-card-content>
+        <p class="ion-text-wrap">{{ announcement.content }}</p>
+      </ion-card-content>
+    </ion-card>
+    
+    <ion-card *ngIf="announcements.length === 0" class="empty-state">
+      <ion-card-content>
+        <ion-icon name="megaphone-outline"></ion-icon>
+        <p>Brak ogłoszeń</p>
+        <p style="font-size: 0.9em; margin-top: 8px;">Kliknij "Sync" aby pobrać dane</p>
+      </ion-card-content>
+    </ion-card>
+  </div>
+
+  <!-- TERMINARZ TAB -->
+  <div *ngIf="selectedTab === 'calendar'" class="section-content">
+    <div class="calendar-toolbar-month">
+      <ion-button
+        fill="clear"
+        size="small"
+        (click)="shiftCalendarMonth(-1)"
+        aria-label="Poprzedni miesiąc">
+        <ion-icon name="chevron-back-outline" slot="icon-only"></ion-icon>
+      </ion-button>
+      <h3 class="calendar-month-heading">{{ calendarMonthTitle }}</h3>
+      <ion-button
+        fill="clear"
+        size="small"
+        (click)="shiftCalendarMonth(1)"
+        aria-label="Następny miesiąc">
+        <ion-icon name="chevron-forward-outline" slot="icon-only"></ion-icon>
+      </ion-button>
+    </div>
+
+    <div class="calendar-weekdays">
+      <span *ngFor="let w of weekdayShort">{{ w }}</span>
+    </div>
+    <div class="calendar-grid-month">
+      <button
+        type="button"
+        class="calendar-cell"
+        *ngFor="let cell of calendarMonthCells"
+        [class.calendar-cell-muted]="!cell.inMonth"
+        [class.calendar-cell-has-events]="cell.events.length > 0"
+        (click)="openCalendarDayCell(cell)">
+        <span class="calendar-cell-day">{{ cell.day }}</span>
+        <span class="calendar-cell-dots" *ngIf="cell.events.length > 0">
+          <span
+            class="calendar-dot"
+            *ngFor="let _ of dotPlaceholder(cell.events.length)"></span>
+        </span>
+      </button>
+    </div>
+
+    <div *ngIf="calendarEventsInMonth.length > 0" class="calendar-list-section">
+      <h4 class="calendar-subheading">Wydarzenia w tym miesiącu</h4>
+      <ion-list lines="none" class="calendar-agenda-list">
+        <ion-item
+          button
+          detail="true"
+          *ngFor="let event of calendarEventsInMonth"
+          (click)="openCalendarEventModal(event)">
+          <ion-icon name="calendar-outline" slot="start" color="primary"></ion-icon>
+          <ion-label>
+            <h3>{{ event.title }}</h3>
+            <p>{{ event.date }}</p>
+          </ion-label>
+          <ion-badge slot="end" *ngIf="event.type" color="medium">{{ event.type }}</ion-badge>
+        </ion-item>
+      </ion-list>
+    </div>
+
+    <div *ngIf="calendarEventsUndated.length > 0" class="calendar-list-section">
+      <h4 class="calendar-subheading">Bez pełnej daty</h4>
+      <div class="calendar-list">
+        <ion-card
+          *ngFor="let event of calendarEventsUndated"
+          class="calendar-card"
+          button="true"
+          (click)="openCalendarEventModal(event)">
+          <ion-card-content>
+            <div class="calendar-card-header">
+              <ion-icon
+                [name]="event.type === 'Sprawdzian' ? 'alarm' : 'calendar'"
+                [color]="event.type === 'Sprawdzian' ? 'warning' : 'primary'">
+              </ion-icon>
+              <div class="calendar-main">
+                <div class="calendar-title-row">
+                  <h2>{{ event.title }}</h2>
+                  <ion-badge *ngIf="event.isNew" color="danger">NOWE</ion-badge>
+                </div>
+                <p *ngIf="event.description" class="calendar-description">{{ event.description }}</p>
+                <div class="calendar-meta">
+                  <ion-badge color="medium" *ngIf="event.date">{{ event.date }}</ion-badge>
+                  <ion-badge [color]="event.type === 'Sprawdzian' ? 'warning' : 'primary'" *ngIf="event.type">
+                    {{ event.type }}
+                  </ion-badge>
+                </div>
+              </div>
+            </div>
+          </ion-card-content>
+        </ion-card>
+      </div>
+    </div>
+
+    <ion-card *ngIf="calendarEvents.length === 0" class="empty-state">
+      <ion-card-content>
+        <ion-icon name="calendar-outline"></ion-icon>
+        <p>Brak wydarzeń</p>
+        <p style="font-size: 0.9em; margin-top: 8px;">Kliknij „Synchronizacja”, aby pobrać terminarz</p>
+      </ion-card-content>
+    </ion-card>
+  </div>
+
 </ion-content>
+
+<!-- MODAL SZCZEGÓŁÓW OCENY -->
+<ion-modal [isOpen]="showGradeModal" (didDismiss)="closeGradeModal()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Szczegóły oceny</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="closeGradeModal()">
+            <ion-icon name="close" slot="icon-only"></ion-icon>
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    
+    <ion-content *ngIf="selectedGrade">
+      <ion-card class="grade-details-card">
+        <ion-card-header>
+          <ion-badge [color]="getGradeColor(selectedGrade.value)">
+            {{ selectedGrade.value }}
+          </ion-badge>
+          <ion-card-subtitle>{{ selectedGrade.subject }}</ion-card-subtitle>
+        </ion-card-header>
+        
+        <ion-card-content>
+          <ion-list lines="full">
+            <ion-item *ngIf="selectedGrade.description">
+              <ion-icon name="create-outline" slot="start" color="primary"></ion-icon>
+              <ion-label>
+                <h3>Opis</h3>
+                <p class="ion-text-wrap">{{ selectedGrade.description }}</p>
+              </ion-label>
+            </ion-item>
+            
+            <ion-item *ngIf="selectedGrade.date">
+              <ion-icon name="calendar-outline" slot="start" color="success"></ion-icon>
+              <ion-label>
+                <h3>Data</h3>
+                <p>{{ selectedGrade.date }}</p>
+              </ion-label>
+            </ion-item>
+            
+            <ion-item *ngIf="selectedGrade.teacher">
+              <ion-icon name="person-outline" slot="start" color="tertiary"></ion-icon>
+              <ion-label>
+                <h3>Nauczyciel</h3>
+                <p>{{ selectedGrade.teacher }}</p>
+              </ion-label>
+            </ion-item>
+            
+            <ion-item *ngIf="selectedGrade.category">
+              <ion-icon name="folder-outline" slot="start" color="warning"></ion-icon>
+              <ion-label>
+                <h3>Kategoria</h3>
+                <p>{{ selectedGrade.category }}</p>
+              </ion-label>
+            </ion-item>
+            
+            <ion-item *ngIf="selectedGrade.weight">
+              <ion-icon name="barbell-outline" slot="start" color="danger"></ion-icon>
+              <ion-label>
+                <h3>Waga</h3>
+                <p>{{ selectedGrade.weight }}</p>
+              </ion-label>
+            </ion-item>
+          </ion-list>
+        </ion-card-content>
+      </ion-card>
+      
+      <ion-button expand="block" (click)="closeGradeModal()">
+        <ion-icon name="checkmark" slot="start"></ion-icon>
+        Zamknij
+      </ion-button>
+    </ion-content>
+  </ng-template>
+</ion-modal>
+
+<!-- Szczegóły wiadomości (treść z API lub doładowana po kliknięciu) -->
+<ion-modal [isOpen]="showMessageModal" (didDismiss)="closeMessageModal()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Wiadomość</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="closeMessageModal()">
+            <ion-icon name="close" slot="icon-only"></ion-icon>
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+
+    <ion-content *ngIf="selectedMessageView">
+      <ion-spinner *ngIf="messageDetailLoading" name="crescent" style="display: block; margin: 24px auto;"></ion-spinner>
+
+      <ion-card>
+        <ion-card-header>
+          <ion-card-subtitle>{{ selectedMessageView.sender }}</ion-card-subtitle>
+          <ion-card-title>{{ selectedMessageView.subject }}</ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <p *ngIf="selectedMessageView.date" style="color: #6c757d; font-size: 0.9em; margin-bottom: 16px;">
+            <ion-icon name="calendar-outline" style="vertical-align: middle;"></ion-icon>
+            {{ selectedMessageView.date }}
+            <span *ngIf="selectedMessageView.hasAttachment" style="margin-left: 12px;">
+              <ion-icon name="attach-outline"></ion-icon> Załącznik
+            </span>
+          </p>
+          <ion-text style="white-space: pre-wrap; line-height: 1.55; font-size: 0.96em;">
+            {{ selectedMessageView.body || (messageDetailLoading ? 'Ładowanie treści…' : 'Brak treści — spróbuj ponownego Sync.') }}
+          </ion-text>
+        </ion-card-content>
+      </ion-card>
+
+      <ion-button expand="block" class="ion-margin" (click)="closeMessageModal()">Zamknij</ion-button>
+    </ion-content>
+  </ng-template>
+</ion-modal>
+
+<!-- Modal: dzień w kalendarzu -->
+<ion-modal [isOpen]="showCalendarDayModal" (didDismiss)="closeCalendarDayModal()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>{{ calendarDayModalTitle }}</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="closeCalendarDayModal()">
+            <ion-icon name="close" slot="icon-only"></ion-icon>
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content>
+      <ion-list *ngIf="calendarDayModalEvents.length > 0">
+        <ion-item
+          button
+          detail="true"
+          *ngFor="let ev of calendarDayModalEvents"
+          (click)="openCalendarEventFromDay(ev)">
+          <ion-label>
+            <h3>{{ ev.title }}</h3>
+            <p *ngIf="ev.description">{{ ev.description }}</p>
+          </ion-label>
+          <ion-badge slot="end" *ngIf="ev.type" color="medium">{{ ev.type }}</ion-badge>
+        </ion-item>
+      </ion-list>
+      <div *ngIf="calendarDayModalEvents.length === 0" class="ion-padding">
+        <p>Brak zaplanowanych wydarzeń tego dnia.</p>
+      </div>
+    </ion-content>
+  </ng-template>
+</ion-modal>
+
+<!-- Modal: szczegóły wydarzenia -->
+<ion-modal [isOpen]="showCalendarEventModal" (didDismiss)="closeCalendarEventModal()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Wydarzenie</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="closeCalendarEventModal()">
+            <ion-icon name="close" slot="icon-only"></ion-icon>
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content *ngIf="selectedCalendarEvent">
+      <ion-card class="calendar-detail-card">
+        <ion-card-header>
+          <ion-card-subtitle *ngIf="selectedCalendarEvent.date">{{ selectedCalendarEvent.date }}</ion-card-subtitle>
+          <ion-card-title>{{ selectedCalendarEvent.title }}</ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <ion-list lines="full">
+            <ion-item *ngIf="selectedCalendarEvent.description">
+              <ion-icon name="document-text-outline" slot="start" color="primary"></ion-icon>
+              <ion-label>
+                <h3>Opis</h3>
+                <p class="ion-text-wrap">{{ selectedCalendarEvent.description }}</p>
+              </ion-label>
+            </ion-item>
+            <ion-item *ngIf="selectedCalendarEvent.startTime">
+              <ion-icon name="time-outline" slot="start" color="tertiary"></ion-icon>
+              <ion-label>
+                <h3>Początek</h3>
+                <p>{{ selectedCalendarEvent.startTime }}</p>
+              </ion-label>
+            </ion-item>
+            <ion-item *ngIf="selectedCalendarEvent.endTime">
+              <ion-icon name="time-outline" slot="start" color="medium"></ion-icon>
+              <ion-label>
+                <h3>Koniec</h3>
+                <p>{{ selectedCalendarEvent.endTime }}</p>
+              </ion-label>
+            </ion-item>
+            <ion-item *ngIf="selectedCalendarEvent.type">
+              <ion-icon name="pricetag-outline" slot="start" color="warning"></ion-icon>
+              <ion-label>
+                <h3>Typ</h3>
+                <p>{{ selectedCalendarEvent.type }}</p>
+              </ion-label>
+            </ion-item>
+          </ion-list>
+        </ion-card-content>
+      </ion-card>
+      <ion-button expand="block" class="ion-margin" (click)="closeCalendarEventModal()">
+        Zamknij
+      </ion-button>
+    </ion-content>
+  </ng-template>
+</ion-modal>
