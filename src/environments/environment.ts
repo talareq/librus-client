@@ -2,8 +2,16 @@
 // `ng build` replaces `environment.ts` with `environment.prod.ts`.
 // The list of file replacements can be found in `angular.json`.
 
+/** Sprawdzanie wersji względem package.json na gałęzi main — wyłączone w dev (npm start). */
 export const environment = {
-  production: false
+  production: false,
+  versionCheck: {
+    enabled: false,
+    packageJsonUrl:
+      'https://raw.githubusercontent.com/talareq/librus-client/main/package.json',
+    /** Strona z buildami (Actions) albo Releases — użytkownik klika „Otwórz repozytorium”. */
+    repositoryPageUrl: 'https://github.com/talareq/librus-client/actions'
+  }
 };
 
 /*
