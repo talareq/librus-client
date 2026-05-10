@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Capacitor, CapacitorCookies, CapacitorHttp } from '@capacitor/core';
+import { devLog, devWarn } from '../utils/dev-log';
 
 /**
  * Pobiera listę wiadomości z REST API skrzynki (to samo co XHR w InAppBrowser),
@@ -156,7 +157,7 @@ export class WiadomosciMessagesApiService {
       if (cookie.trim().length > 0) {
         headers['Cookie'] = cookie;
         if (page === 1) {
-          console.log(
+          devLog(
             `📬 REST api/inbox/messages — nagłówek Cookie z magazynu wiadomosci.librus.pl (${cookie.length} zn.):`,
             cookie
           );
@@ -212,7 +213,7 @@ export class WiadomosciMessagesApiService {
       nativeJar = await this.wiadomosciCookieJar();
       if (!this.nativeJarLooksLikeWiadomosciSession(nativeJar)) {
         const keys = Object.keys(nativeJar).sort();
-        console.log(
+        devLog(
           '📬 Pomijam natywny REST wiadomości — stąd brak linii „REST api/inbox … Cookie”. ' +
             'Magazyn Capacitor `wiadomosci.librus.pl`: ' +
             (keys.length === 0 ? '(pusto)' : keys.join(', ')) +
@@ -227,7 +228,7 @@ export class WiadomosciMessagesApiService {
       const raw = await this.fetchMessagesPage(page, limit, nativeJar);
 
       if (raw === false) {
-        console.warn(
+        devWarn(
           '⚠️ Wiadomości API: żądanie HTTP nieudane mimo ciastek (wygasła sesja / sieć) — użyty zostanie InAppBrowser.'
         );
         return null;
@@ -235,7 +236,7 @@ export class WiadomosciMessagesApiService {
 
       const parsed = this.parseInboxResponseBody(raw);
       if (!parsed) {
-        console.warn('⚠️ Wiadomości API: odpowiedź nie wygląda jak JSON inboxu');
+        devWarn('⚠️ Wiadomości API: odpowiedź nie wygląda jak JSON inboxu');
         return null;
       }
 

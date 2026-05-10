@@ -116,6 +116,10 @@ If that URL returns **404**, the repo has **no releases yet** (the workflow has 
 
 The [`release-apk`](.github/workflows/release-apk.yml) workflow builds the app and attaches **`librus-client.apk`**. Publishing a release also triggers the post-release version bump on `main` (see [`.github/workflows/bump-version-after-release.yml`](.github/workflows/bump-version-after-release.yml)).
 
+**Łańcuch zdarzeń:** po **opublikowaniu** release GitHub wywołuje **Bump version after release** → **`npm version patch`** na `main` → commit z `[skip ci]` (wersja w `package.json` i iOS idzie w górę automatycznie).
+
+**Opcja: merge uruchamia release** — jeśli w **treści commita** na `main` jest znacznik **`[publish-apk]`** (np. w opisie merge albo w wiadomości squasha), to po zielonym **[Build Android APK](.github/workflows/build-android-apk.yml)** workflow **[chain-release-after-apk-ci](.github/workflows/chain-release-after-apk-ci.yml)** sam wywoła **Release debug APK** z `version` z `package.json` z tego commita. **Nie** dodawaj znacznika przy zwykłych merge’ach — tylko przy świadomym wydaniu (inaczej każdy taki commit robiłby nowe release i podwójny build).
+
 ### CI artifacts (every push to `main`)
 
 On each successful run, CI produces a **debug** `app-debug.apk` (installable for local testing; not a Play Store release build).

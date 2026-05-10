@@ -7,6 +7,8 @@ import { LibrusScraperService } from './librus-scraper.service';
 import { LibrusStorageService } from './librus-storage.service';
 import { WiadomosciMessagesApiService } from './wiadomosci-messages-api.service';
 import { SyncResult, SyncProgress, SyncAllOptions, Message } from '../models/librus-data.models';
+import { environment } from '../../environments/environment';
+import { devInfo, devLog, devWarn } from '../utils/dev-log';
 
 interface CookieData {
   url: string;
@@ -27,6 +29,8 @@ interface SessionData {
 })
 export class LibrusAuthService {
   private browser: InAppBrowserObject | null = null;
+  /** Ponowne wstrzyknięcie rozmycia (React/SPA montuje inputy po pierwszym loadstop). */
+  private demoIabBlurRetryHandles: ReturnType<typeof setTimeout>[] = [];
   /** Unikamy wielu handlerów loadstop (każdy miałby własny scrapingInProgress → nieskończona pętla injectScript). */
   private scrapeLoadStopSub: Subscription | null = null;
   /** Stare callbacki async po przejściu do kolejnej sekcji synchronizacji — ignorujemy. */
@@ -48,7 +52,7 @@ export class LibrusAuthService {
     this.domScrapeUiGateDoneForSync = true;
     try {
       this.browser?.hide();
-      console.log('👁️ InAppBrowser ukryty — w tle odczyt DOM; w aplikacji widać preloader.');
+      devLog('👁️ InAppBrowser ukryty — w tle odczyt DOM; w aplikacji widać preloader.');
     } catch {
       /* noop */
     }
@@ -57,6 +61,82 @@ export class LibrusAuthService {
     } catch {
       /* noop */
     }
+  }
+
+  /** Czy ten adres w IAB wygląda jak logowanie / OAuth (włącza rozmycie pól). */
+  private shouldDemoBlurWebViewUrl(url: string): boolean {
+    const u = url.toLowerCase();
+    return (
+      u.includes('loguj') ||
+      u.includes('zaloguj') ||
+      u.includes('/login') ||
+      u.includes('rodzina/synergia') ||
+      u.includes('konto.librus') ||
+      u.includes('konto-librus') ||
+      u.includes('/register') ||
+      u.includes('session-expired') ||
+      u.includes('accounts.google.') ||
+      u.includes('/oauth') ||
+      u.includes('openid')
+    );
+  }
+
+  private clearDemoIabBlurRetries(): void {
+    for (const h of this.demoIabBlurRetryHandles) {
+      clearTimeout(h);
+    }
+    this.demoIabBlurRetryHandles = [];
+  }
+
+  /**
+   * Kilka ponowień — jeden loadstop często jest zanim React/osadzone API pokaże inputy.
+   */
+  private armDemoIabBlurRetries(): void {
+    this.clearDemoIabBlurRetries();
+    if (!environment.demoRecordingPrivacy || !this.browser) {
+      return;
+    }
+    const inject = (): void => {
+      if (!environment.demoRecordingPrivacy || !this.browser) {
+        return;
+      }
+      const code = this.demoRecordingBlurInstallInWebView();
+      void this.browser.executeScript({ code });
+    };
+    for (const ms of [0, 100, 350, 900, 2000, 4500, 8000]) {
+      this.demoIabBlurRetryHandles.push(setTimeout(inject, ms));
+    }
+  }
+
+  /**
+   * Rozmycie + maskowanie znaków w polach formularza na stronach logowania (także Shadow DOM / SPA).
+   * Wymaga `environment.demoRecordingPrivacy` (np. build: `npm run build:demo`).
+   */
+  private syncDemoRecordingBlurForWebView(url: string): void {
+    if (!environment.demoRecordingPrivacy || !this.browser || !url) {
+      return;
+    }
+    const blurInputs = this.shouldDemoBlurWebViewUrl(url);
+    if (!blurInputs) {
+      this.clearDemoIabBlurRetries();
+      void this.browser.executeScript({ code: this.demoRecordingBlurRemoveFromWebView() });
+      return;
+    }
+    devInfo('[demo-privacy] Rozmycie pól logowania w InAppBrowser — jeśli nadal widać tekst, zbuduj app: npm run build:demo && npx cap sync android');
+    void this.browser.executeScript({ code: this.demoRecordingBlurInstallInWebView() });
+    this.armDemoIabBlurRetries();
+  }
+
+  /**
+   * Jedna linia — niektóre WebView gorzej radzą sobie z wieloliniowym `evaluateJavascript`.
+   * Style także w otwartym Shadow DOM; [role=textbox] dla widżetów typu ARIA.
+   */
+  private demoRecordingBlurInstallInWebView(): string {
+    return "(function(){try{var STYLE_ID='librus-demo-login-blur-style';var CSS='input:not([type=hidden]),textarea,select,[contenteditable=\\\"true\\\"],[contenteditable=\\\"\\\"],[contenteditable],[role=textbox]{-webkit-text-security:disc!important;filter:blur(18px)!important;-webkit-filter:blur(18px)!important;letter-spacing:0.6em!important;color:transparent!important;text-shadow:0 0 12px rgba(0,0,0,0.85)!important;}';function ensureMain(){var e=document.getElementById(STYLE_ID);if(!e){e=document.createElement('style');e.id=STYLE_ID;(document.head||document.documentElement).appendChild(e);}e.textContent=CSS;}function injectShadow(r){if(!r||!r.appendChild)return;try{if(r.querySelector&&r.querySelector('#'+STYLE_ID))return;var s=document.createElement('style');s.id=STYLE_ID;s.textContent=CSS;r.appendChild(s);}catch(_){}}function walk(n){if(!n)return;if(n.shadowRoot)injectShadow(n.shadowRoot);var ch=n.children||[];for(var i=0;i<ch.length;i++)walk(ch[i]);}function boot(){ensureMain();if(document.body)walk(document.body);}boot();if(!window.__librusDemoBlurObserver){window.__librusDemoBlurObserver=new MutationObserver(function(){boot();});window.__librusDemoBlurObserver.observe(document.documentElement,{childList:true,subtree:true});}}catch(_){}})();";
+  }
+
+  private demoRecordingBlurRemoveFromWebView(): string {
+    return "(function(){try{var mo=window.__librusDemoBlurObserver;if(mo&&mo.disconnect)mo.disconnect();delete window.__librusDemoBlurObserver;var e=document.getElementById('librus-demo-login-blur-style');if(e)e.remove();}catch(_){}})();";
   }
 
   private readonly COOKIE_STORAGE_KEY = 'librus_session_cookies';
@@ -85,7 +165,7 @@ export class LibrusAuthService {
     private storageService: LibrusStorageService,
     private wiadomosciMsgsApi: WiadomosciMessagesApiService
   ) {
-    console.log('🚀 LibrusAuthService: Inicjalizacja...');
+    devLog('🚀 LibrusAuthService: Inicjalizacja...');
   }
 
   async restoreSavedCookies(): Promise<boolean> {
@@ -93,19 +173,19 @@ export class LibrusAuthService {
       const { value } = await Preferences.get({ key: this.COOKIE_STORAGE_KEY });
       
       if (!value) {
-        console.log('Brak zapisanych cookies.');
+        devLog('Brak zapisanych cookies.');
         return false;
       }
 
       const sessionData: SessionData = JSON.parse(value);
       
       if (sessionData.expiresAt && Date.now() > sessionData.expiresAt) {
-        console.log('Sesja wygasła, usuwam stare cookies.');
+        devLog('Sesja wygasła, usuwam stare cookies.');
         await this.clearSession();
         return false;
       }
 
-      console.log(`Przywracam ${sessionData.cookies.length} zapisanych cookies...`);
+      devLog(`Przywracam ${sessionData.cookies.length} zapisanych cookies...`);
       
       for (const cookie of sessionData.cookies) {
         await CapacitorCookies.setCookie({
@@ -117,7 +197,7 @@ export class LibrusAuthService {
         });
       }
 
-      console.log('Cookies przywrócone pomyślnie!');
+      devLog('Cookies przywrócone pomyślnie!');
       return true;
     } catch (error) {
       console.error('Błąd przywracania cookies:', error);
@@ -134,38 +214,40 @@ export class LibrusAuthService {
       const { value } = await Preferences.get({ key: this.COOKIE_STORAGE_KEY });
       
       if (!value) {
-        console.log('⚠️ Brak cookies do wstrzyknięcia.');
+        devLog('⚠️ Brak cookies do wstrzyknięcia.');
         return;
       }
 
       const sessionData: SessionData = JSON.parse(value);
       
       if (sessionData.expiresAt && Date.now() > sessionData.expiresAt) {
-        console.log('⚠️ Sesja wygasła.');
+        devLog('⚠️ Sesja wygasła.');
         return;
       }
 
-      console.log(`💉 Wstrzykuję ${sessionData.cookies.length} cookies...`);
+      devLog(`💉 Wstrzykuję ${sessionData.cookies.length} cookies...`);
 
-      // Tworzymy skrypt który wstrzyknie każdy cookie osobno
+      // Tworzymy skrypt który wstrzyknie każdy cookie osobno (nazwa/wartość escapowane — unikamy przełamania literału JS)
       const cookieScripts = sessionData.cookies
         .map(c => {
           const expires = new Date();
           expires.setFullYear(expires.getFullYear() + 1);
-          return `document.cookie = '${c.key}=${c.value}; path=/; domain=.librus.pl; expires=${expires.toUTCString()}';`;
+          const k = this.escapeJsSingleQuoted(c.key);
+          const v = this.escapeJsSingleQuoted(c.value);
+          const exp = this.escapeJsSingleQuoted(expires.toUTCString());
+          return `document.cookie = '${k}=${v}; path=/; domain=.librus.pl; expires=${exp}';`;
         })
         .join('\n');
 
       const injectScript = `
         (function() {
           ${cookieScripts}
-          console.log('✅ Cookies wstrzyknięte: ' + document.cookie);
           return document.cookie;
         })();
       `;
 
       const result = await this.browser.executeScript({ code: injectScript });
-      console.log('✅ Cookies wstrzyknięte do przeglądarki. Wynik:', result);
+      devLog('✅ Cookies wstrzyknięte do przeglądarki. Wynik:', result);
     } catch (error) {
       console.error('❌ Błąd wstrzykiwania cookies:', error);
     }
@@ -187,30 +269,35 @@ export class LibrusAuthService {
       const cookieString = result && result[0] ? result[0] : '';
 
       if (!cookieString) {
-        console.log('⚠️ Brak cookies do wyodrębnienia z przeglądarki.');
+        devLog('⚠️ Brak cookies do wyodrębnienia z przeglądarki.');
         return;
       }
 
-      console.log('📦 Wyodrębnione cookies:', cookieString);
+      devLog('📦 Wyodrębnione cookies:', cookieString);
 
       const cookiePairs = cookieString.split(';').map((c: string) => c.trim());
       const cookies: CookieData[] = [];
 
       for (const pair of cookiePairs) {
-        const [key, value] = pair.split('=');
+        const eq = pair.indexOf('=');
+        if (eq <= 0) {
+          continue;
+        }
+        const key = pair.slice(0, eq).trim();
+        const value = pair.slice(eq + 1).trim();
         if (key && value) {
           cookies.push({
             url: 'https://synergia.librus.pl',
-            key: key.trim(),
-            value: value.trim(),
+            key,
+            value,
             path: '/'
           });
 
           // Zapisujemy też do CapacitorCookies jako backup
           await CapacitorCookies.setCookie({
             url: 'https://synergia.librus.pl',
-            key: key.trim(),
-            value: value.trim(),
+            key,
+            value,
             path: '/'
           });
         }
@@ -228,8 +315,8 @@ export class LibrusAuthService {
           value: JSON.stringify(sessionData)
         });
 
-        console.log(`✅ Zapisano ${cookies.length} cookies do Preferences.`);
-        console.log('📋 Lista cookies:', cookies.map(c => c.key).join(', '));
+        devLog(`✅ Zapisano ${cookies.length} cookies do Preferences.`);
+        devLog('📋 Lista cookies:', cookies.map(c => c.key).join(', '));
       }
     } catch (error) {
       console.error('❌ Błąd wyodrębniania cookies z przeglądarki:', error);
@@ -253,12 +340,12 @@ export class LibrusAuthService {
             });
           });
         } catch (err) {
-          console.warn(`Nie można pobrać cookies z ${domain}:`, err);
+          devWarn(`Nie można pobrać cookies z ${domain}:`, err);
         }
       }
 
       if (allCookies.length === 0) {
-        console.log('Brak cookies do zapisania.');
+        devLog('Brak cookies do zapisania.');
         return;
       }
 
@@ -273,7 +360,7 @@ export class LibrusAuthService {
         value: JSON.stringify(sessionData)
       });
 
-      console.log(`Zapisano ${allCookies.length} cookies.`);
+      devLog(`Zapisano ${allCookies.length} cookies.`);
     } catch (error) {
       console.error('Błąd zapisywania cookies:', error);
     }
@@ -281,13 +368,13 @@ export class LibrusAuthService {
 
   async clearSession(): Promise<void> {
     try {
-      console.log('🧹 Czyszczenie markera sesji...');
+      devLog('🧹 Czyszczenie markera sesji...');
       await Preferences.remove({ key: this.COOKIE_STORAGE_KEY });
       
       // NIE zamykamy przeglądarki, tylko czyścimy marker
       // Przeglądarka zostanie zamknięta przez użytkownika lub przy wylogowaniu
       
-      console.log('✅ Marker sesji wyczyszczony.');
+      devLog('✅ Marker sesji wyczyszczony.');
     } catch (error) {
       console.error('❌ Błąd czyszczenia sesji:', error);
     }
@@ -295,7 +382,7 @@ export class LibrusAuthService {
 
   async forceLogout(): Promise<void> {
     try {
-      console.log('🚪 Wymuszam pełne wylogowanie...');
+      devLog('🚪 Wymuszam pełne wylogowanie...');
       
       // Czyścimy marker
       await this.clearSession();
@@ -303,8 +390,9 @@ export class LibrusAuthService {
       // Zamykamy przeglądarkę aby wymusić nowe logowanie
       if (this.browser) {
         this.browser.close();
+        this.clearDemoIabBlurRetries();
         this.browser = null;
-        console.log('✅ Przeglądarka zamknięta - sesja całkowicie wyczyszczona.');
+        devLog('✅ Przeglądarka zamknięta - sesja całkowicie wyczyszczona.');
       }
     } catch (error) {
       console.error('❌ Błąd wylogowania:', error);
@@ -316,7 +404,7 @@ export class LibrusAuthService {
    * Wartości mogą obejmować identyfikatory sesji — używaj tylko przy lokalnym debugowaniu.
    */
   async dumpCookiesToConsole(reason = 'debug'): Promise<void> {
-    console.log(`\n🍪 ---------- zrzut cookies (${reason}) ----------`);
+    devLog(`\n🍪 ---------- zrzut cookies (${reason}) ----------`);
     for (const origin of this.capacitorJarOrigins) {
       try {
         const jar = await CapacitorCookies.getCookies({ url: origin });
@@ -324,16 +412,16 @@ export class LibrusAuthService {
         const keys = Object.keys(rec || {});
         const header =
           keys.length > 0 ? this.jarToCookieHeader(rec).trim() : '';
-        console.log(`🍪 CapacitorCookies [${origin}]`);
-        console.log(
+        devLog(`🍪 CapacitorCookies [${origin}]`);
+        devLog(
           `   liczba: ${keys.length}${keys.length ? ` → ${keys.join(', ')}` : ' (brak lub niedostępne na tej platformie)'}`
         );
-        console.log('   jako obiekt:', rec);
+        devLog('   jako obiekt:', rec);
         if (header.length > 0) {
-          console.log(`   nagłówek Cookie (${header.length} znaków):`, header);
+          devLog(`   nagłówek Cookie (${header.length} znaków):`, header);
         }
       } catch (e) {
-        console.warn(`🍪 CapacitorCookies [${origin}] błąd:`, e);
+        devWarn(`🍪 CapacitorCookies [${origin}] błąd:`, e);
       }
     }
     if (this.browser) {
@@ -344,26 +432,26 @@ export class LibrusAuthService {
         });
         const txt = this.parseBridgeScriptResult(raw?.[0]);
         const dc = typeof txt === 'string' ? txt : '';
-        console.log(
+        devLog(
           '🍪 IAB WebView document.cookie:',
           dc.length ? dc : '(pusto lub niedostępne)'
         );
-        console.log(
+        devLog(
           '   (HttpOnly nie widać w document.cookie — tylko w natywnym słoiku / sieci)'
         );
       } catch (e) {
-        console.warn('🍪 IAB document.cookie — błąd:', e);
+        devWarn('🍪 IAB document.cookie — błąd:', e);
       }
     } else {
-      console.log('🍪 IAB WebView — brak aktywnej instancji (document.cookie pominięty)');
+      devLog('🍪 IAB WebView — brak aktywnej instancji (document.cookie pominięty)');
     }
-    console.log(`🍪 ---------- koniec zrzutu (${reason}) ----------\n`);
+    devLog(`🍪 ---------- koniec zrzutu (${reason}) ----------\n`);
   }
 
   /** Podczas Sync: same nazwy kluczy w natywnym słoiku (bez wartości). */
   private async logCapacitorCookieJarKeysBrief(context: string): Promise<void> {
     if (!Capacitor.isNativePlatform()) {
-      console.log(
+      devLog(
         `🍪 ${context} — CapacitorCookies: (pominięto — nie urządzenie natywne)`
       );
       return;
@@ -381,14 +469,14 @@ export class LibrusAuthService {
         }
         summary[host] = keys;
       }
-      console.log(`🍪 ${context} — klucze CapacitorCookies`, summary);
+      devLog(`🍪 ${context} — klucze CapacitorCookies`, summary);
       const w = summary['wiadomosci.librus.pl'];
-      console.log(
+      devLog(
         `   → wiadomosci.librus.pl: ${w?.length ?? 0} wpisów` +
           (w?.length ? ` (${w.join(', ')})` : ' — REST skrzynki wymaga tego słoika')
       );
     } catch (e) {
-      console.warn(`🍪 ${context} — odczyt słoika:`, e);
+      devWarn(`🍪 ${context} — odczyt słoika:`, e);
     }
   }
 
@@ -397,7 +485,7 @@ export class LibrusAuthService {
       const { value } = await Preferences.get({ key: this.COOKIE_STORAGE_KEY });
       
       if (!value) {
-        console.log('❌ Brak zapisanego markera sesji');
+        devLog('❌ Brak zapisanego markera sesji');
         await this.dumpCookiesToConsole('Sesja/app — marker brak 🐛');
         return { exists: false };
       }
@@ -407,22 +495,22 @@ export class LibrusAuthService {
       const isExpired = sessionData.expiresAt ? now > sessionData.expiresAt : false;
       const browserExists = this.browser !== null;
       
-      console.log('=== SESSION DEBUG ===');
-      console.log('Marker aktywny:', sessionData.active);
-      console.log('Przeglądarka istnieje:', browserExists);
-      console.log('Timestamp:', new Date(sessionData.timestamp).toLocaleString());
-      console.log('Wygasa:', sessionData.expiresAt ? new Date(sessionData.expiresAt).toLocaleString() : 'brak');
-      console.log('Czy wygasło?', isExpired);
+      devLog('=== SESSION DEBUG ===');
+      devLog('Marker aktywny:', sessionData.active);
+      devLog('Przeglądarka istnieje:', browserExists);
+      devLog('Timestamp:', new Date(sessionData.timestamp).toLocaleString());
+      devLog('Wygasa:', sessionData.expiresAt ? new Date(sessionData.expiresAt).toLocaleString() : 'brak');
+      devLog('Czy wygasło?', isExpired);
       const savedCookieRows = Array.isArray(sessionData.cookies)
         ? (sessionData.cookies as CookieData[])
         : null;
       if (savedCookieRows && savedCookieRows.length > 0) {
-        console.log(
+        devLog(
           `🍪 Snapshot w Preferences (${savedCookieRows.length} wpisów z saveCookies):`,
           savedCookieRows
         );
       } else {
-        console.log(
+        devLog(
           '🍪 W Preferences pod tym kluczem brak tablicy `cookies` (np. sam marker po markSessionActive).'
         );
       }
@@ -448,7 +536,7 @@ export class LibrusAuthService {
       const { value } = await Preferences.get({ key: this.COOKIE_STORAGE_KEY });
       
       if (!value) {
-        console.log('❌ Brak zapisanego markera sesji.');
+        devLog('❌ Brak zapisanego markera sesji.');
         return false;
       }
 
@@ -459,7 +547,7 @@ export class LibrusAuthService {
       const notExpired = !sessionData.expiresAt || Date.now() <= sessionData.expiresAt;
       const browserExists = this.browser !== null;
 
-      console.log('📊 Status sesji:', {
+      devLog('📊 Status sesji:', {
         isActive,
         notExpired,
         browserExists,
@@ -467,7 +555,7 @@ export class LibrusAuthService {
       });
 
       if (!notExpired) {
-        console.log('⏰ Sesja wygasła lokalnie (timeout).');
+        devLog('⏰ Sesja wygasła lokalnie (timeout).');
         await this.clearSession();
         return false;
       }
@@ -478,7 +566,7 @@ export class LibrusAuthService {
       const isValid = isActive && notExpired;
 
       if (isValid && !browserExists) {
-        console.log(
+        devLog(
           'ℹ️ Marker sesji aktywny — instancja IAB zamknięta; kolejny Sync otworzy ukryty WebView lub poprosi o logowanie.'
         );
       }
@@ -503,7 +591,7 @@ export class LibrusAuthService {
     const meta = this.parseBridgeScriptResult(bootstrap?.[0]) as Record<string, unknown> | null;
 
     if (!meta || meta['ok'] !== true || typeof meta['parts'] !== 'number') {
-      console.warn(
+      devWarn(
         '⚠️ Oceny (chunk bootstrap) — meta:',
         JSON.stringify(meta)
       );
@@ -512,10 +600,10 @@ export class LibrusAuthService {
 
     const parts = meta['parts'] as number;
     if (!Number.isFinite(parts) || parts < 0 || parts > 20000) {
-      console.warn('⚠️ Oceny — nieprawidłowa liczba części:', parts);
+      devWarn('⚠️ Oceny — nieprawidłowa liczba części:', parts);
       return null;
     }
-    console.log(`📚 Oceny — transport w częściach: ${parts} segmentów, ~${meta['len']} bajtów JSON`);
+    devLog(`📚 Oceny — transport w częściach: ${parts} segmentów, ~${meta['len']} bajtów JSON`);
 
     let buf = '';
     for (let i = 0; i < parts; i++) {
@@ -557,7 +645,7 @@ export class LibrusAuthService {
       try {
         return JSON.parse(s);
       } catch (e) {
-        console.warn('⚠️ parseBridgeScriptResult: niepoprawny JSON z WebView:', s.slice(0, 280));
+        devWarn('⚠️ parseBridgeScriptResult: niepoprawny JSON z WebView:', s.slice(0, 280));
         return null;
       }
     }
@@ -644,8 +732,8 @@ export class LibrusAuthService {
     } catch {
       /* noop */
     }
+    this.clearDemoIabBlurRetries();
     this.browser = null;
-    console.log(`👁️ InAppBrowser zamknięty (${reason}).`);
   }
 
   /** Docelowy URL jest na innym hoście niż portal — SSO często pokazuje portal pośredni; nie wylogowujemy. */
@@ -811,9 +899,15 @@ export class LibrusAuthService {
     return false;
   }
 
-  /** Bezpieczny string wewnątrz pojedynczo cytowanego literału JS dla `executeScript`. */
+  /**
+   * String w literale `'…'` przekazywanym do `executeScript` — bez znaków końca linii (składnia JS),
+   * escapowane `\` oraz `'`.
+   */
   private escapeJsSingleQuoted(value: string): string {
-    return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return String(value)
+      .replace(/[\r\n\u2028\u2029]/g, '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
   }
 
   /**
@@ -871,14 +965,14 @@ export class LibrusAuthService {
       const h = await this.readWebViewLocationHref('');
       if (predicate(h)) {
         if (progressLabel) {
-          console.log(`🔗 ${progressLabel}: OK`, h.length > 140 ? h.slice(0, 140) + '…' : h);
+          devLog(`🔗 ${progressLabel}: OK`, h.length > 140 ? h.slice(0, 140) + '…' : h);
         }
         return true;
       }
       if (opts?.earlyFailIf?.(h)) {
         badStreak += 1;
         if (badStreak >= needBad) {
-          console.warn(
+          devWarn(
             `🔗 ${progressLabel}: wczesne zakończenie (${badStreak}×) — ${opts.earlyFailLog ?? 'earlyFailIf'}`,
             h ? h.slice(0, 160) : '(brak)'
           );
@@ -892,7 +986,7 @@ export class LibrusAuthService {
         Date.now() - lastProgressLog >= progressEveryMs
       ) {
         lastProgressLog = Date.now();
-        console.log(
+        devLog(
           `🔗 ${progressLabel}: czekam (${stepMs} ms / próba href)…`,
           h ? (h.length > 130 ? h.slice(0, 130) + '…' : h) : '(brak)'
         );
@@ -900,7 +994,7 @@ export class LibrusAuthService {
     }
     if (progressLabel) {
       const tail = await this.readWebViewLocationHref('');
-      console.warn(
+      devWarn(
         `🔗 ${progressLabel}: koniec czasu (${timeoutMs} ms), ostatni href:`,
         tail ? tail.slice(0, 180) : '(brak)'
       );
@@ -947,7 +1041,7 @@ export class LibrusAuthService {
             return x === '' ? '/' : x;
           };
           if (normPath(curU.pathname) !== normPath(tgtU.pathname)) {
-            console.log(
+            devLog(
               '🔗 Skrzynka: już na wiadomosci — tylko zmiana ścieżki (bez ponownego mostka Synergia):',
               target.slice(0, 96)
             );
@@ -965,7 +1059,7 @@ export class LibrusAuthService {
               })();`,
             });
           } else {
-            console.log('🔗 Skrzynka: już na docelowej ścieżce wiadomosci — pomijam mostek.');
+            devLog('🔗 Skrzynka: już na docelowej ścieżce wiadomosci — pomijam mostek.');
           }
           await new Promise<void>(r => setTimeout(r, 500));
           return;
@@ -975,7 +1069,7 @@ export class LibrusAuthService {
       /* pełny mostek Synergia → Wiadomości */
     }
 
-    console.log(
+    devLog(
       '🔗 Skrzynka: wejście jak w przeglądarce (Synergia → link Wiadomości); sam URL wiadomosci bez SSO zwykle daje session-expired.'
     );
 
@@ -1037,7 +1131,7 @@ export class LibrusAuthService {
       const hrefAlready = await this.readWebViewLocationHref('');
       const hrefNorm = this.ensureHttpsLibrusUrl(hrefAlready || '');
       if (postLoginSurface(hrefNorm)) {
-        console.log(
+        devLog(
           '🔗 Skrzynka: już na zalogowanej Synergii — bez przeładowania przed „Wiadomości”:',
           hrefNorm.length > 120 ? hrefNorm.slice(0, 120) + '…' : hrefNorm
         );
@@ -1059,11 +1153,11 @@ export class LibrusAuthService {
         if (okSyn) {
           return true;
         }
-        console.log(
+        devLog(
           `🔗 Skrzynka: wejście ${ent.slice(0, 48)}… nie przyniosło zalogowanej Synergii — następna próba`
         );
       }
-      console.warn(
+      devWarn(
         '🔗 Skrzynka: timeout — nie udaje się wrócić na zalogowaną Synergię przed skrzynką.'
       );
       return false;
@@ -1165,7 +1259,7 @@ export class LibrusAuthService {
     let opened = await tryNavigateWiadFromSynergiaMenu('Wiadomości po przejściu z Synergii');
 
     if (!opened) {
-      console.warn(
+      devWarn(
         '🔗 Skrzynka: powtórka SSO — portal …/rodzina/synergia, potem ponownie link „Wiadomości”.'
       );
       await b.executeScript({
@@ -1186,7 +1280,7 @@ export class LibrusAuthService {
     }
 
     if (!opened) {
-      console.warn(
+      devWarn(
         '🔗 Skrzynka: po próbach SSO nadal brak sesji na wiadomościach — bezpośrednio: ' +
           warm
       );
@@ -1204,7 +1298,7 @@ export class LibrusAuthService {
 
     const hrefAfter = await this.readWebViewLocationHref('');
     if (hrefAfter.includes('session-expired') || !hrefAfter.includes('wiadomosci.librus.pl')) {
-      console.warn(
+      devWarn(
         '🔗 Skrzynka: nie ustawiono ważnej sesji na wiadomościach — dalszy scraping prawdopodobnie zwróci pusto.'
       );
       return;
@@ -1261,7 +1355,7 @@ export class LibrusAuthService {
   async fetchInboxMessageDetail(messageId: string): Promise<Partial<Message> | null> {
     const id = String(messageId || '').trim();
     if (!/^\d+$/.test(id)) {
-      console.warn('fetchInboxMessageDetail: pomijam — oczekiwany numeryczny messageId z API');
+      devWarn('fetchInboxMessageDetail: pomijam — oczekiwany numeryczny messageId z API');
       return null;
     }
     try {
@@ -1293,7 +1387,7 @@ export class LibrusAuthService {
         hasAttachment: obj['hasAttachment'] === true ? true : undefined
       };
     } catch (e) {
-      console.warn('fetchInboxMessageDetail: błąd', e);
+      devWarn('fetchInboxMessageDetail: błąd', e);
       return null;
     } finally {
       this.browser?.hide();
@@ -1338,10 +1432,10 @@ export class LibrusAuthService {
       }
     }
     if (bestFromJar !== null) {
-      console.log('🍪 DZIENNIKSID: użyto pełnej wartości z innego pola słoika (jak w przeglądarce)');
+      devLog('🍪 DZIENNIKSID: użyto pełnej wartości z innego pola słoika (jak w przeglądarce)');
       return bestFromJar;
     }
-    console.warn(
+    devWarn(
       '🍪 W natywnym słoiku brak pełnego DZIENNIKSID — jest tylko fragment bez „Axx~”; nie tworzymy sztucznego prefiksu.'
     );
     return null;
@@ -1364,7 +1458,7 @@ export class LibrusAuthService {
       return;
     }
     try {
-      console.log(
+      devLog(
         '🍪 [prepare wiadomości] początek: odczyt natywnego słoika synergia → ewentualny CapacitorHttp GET /nowy/'
       );
       const synergiaJar = await CapacitorCookies.getCookies({
@@ -1373,7 +1467,7 @@ export class LibrusAuthService {
       const canonical = this.dziennikSidForWiadomosciFromSynergiaJar(synergiaJar);
       if (!canonical) {
         const sk = Object.keys(synergiaJar || {}).sort();
-        console.log(
+        devLog(
           '🍪 [prepare wiadomości] STOP — brak DZIENNIKSID ze słoika synergii; nie wywołuję CapacitorHttp ani nie mam czego policzyć jako nagłówek Cookie dla /nowy/. Klucze synergia:',
           sk.length ? sk.join(', ') : '(pusty magazyn — typowe przy samym WebView/IAB bez mostka do Ciastek)'
         );
@@ -1391,7 +1485,7 @@ export class LibrusAuthService {
           value: canonical,
           path: '/',
         });
-        console.log(
+        devLog(
           '🍪 DZIENNIKSID: skopiowany z pola Synergii do wiadomości (CapacitorCookies).'
         );
       }
@@ -1401,12 +1495,12 @@ export class LibrusAuthService {
       });
       const ch = this.jarToCookieHeader(wd).trim();
       if (!ch) {
-        console.log(
+        devLog(
           '🍪 [prepare wiadomości] STOP — po setCookie magazyn wiadomosci.librus.pl nadal bez par klucz=wartość; brak wywołania CapacitorHttp.'
         );
         return;
       }
-      console.log(
+      devLog(
         `🌡️ CapacitorHttp GET …/nowy/ — pełny nagłówek Cookie (${ch.length} zn., jak w przeglądarce dla tej domeny):`,
         ch
       );
@@ -1417,9 +1511,9 @@ export class LibrusAuthService {
           Cookie: ch,
         },
       });
-      console.log('🌡️ GET wiadomosci/nowy/ (CapacitorHttp): dogrywanie cookiesession1 itp.');
+      devLog('🌡️ GET wiadomosci/nowy/ (CapacitorHttp): dogrywanie cookiesession1 itp.');
     } catch (err) {
-      console.warn(
+      devWarn(
         '⚠️ Przygotowanie ciastek wiadomości po Synergii: pomijam (brak dostępu do słoika?):',
         err
       );
@@ -1437,9 +1531,9 @@ export class LibrusAuthService {
           `(function(){ try {\n          var xhr = new XMLHttpRequest();\n          xhr.open('GET', 'https://wiadomosci.librus.pl/nowy/', false);\n          xhr.setRequestHeader('Accept', 'text/html,*/*');\n          xhr.withCredentials = true;\n          xhr.send(null);\n          return JSON.stringify({ status: xhr.status });\n        } catch(e) {\n          return JSON.stringify({ err: String(e.message || e) });\n        } })();`,
       });
       const txt = typeof raw?.[0] === 'string' ? raw[0] : JSON.stringify(raw);
-      console.log('🌡️ Warm-up wiadomości w InAppBrowser (XHR /nowy/):', txt?.slice(0, 220));
+      devLog('🌡️ Warm-up wiadomości w InAppBrowser (XHR /nowy/):', txt?.slice(0, 220));
       if (txt && txt.includes('"err"')) {
-        console.log(
+        devLog(
           'ℹ️ Synchroniczny XHR z innego hosta w WebView często jest blokowany (CORS/ polityka). Dogrywanie ciastek robi CapacitorHttp + DZIENNIKSID w natywnym słoiku.'
         );
       }
@@ -1552,9 +1646,9 @@ export class LibrusAuthService {
         '_blank',
         'location=yes,hidden=no,clearcache=no,clearsessioncache=no,cleardata=no'
       );
-      console.log(`🧪 TEST: nowe IAB — ${loginUrl}`);
+      devLog(`🧪 TEST: nowe IAB — ${loginUrl}`);
     } else {
-      console.log('🧪 TEST: istniejące IAB — show + powrót na logowanie');
+      devLog('🧪 TEST: istniejące IAB — show + powrót na logowanie');
       await this.browser.show();
       await this.browser.executeScript({
         code: `window.location.href = ${JSON.stringify(loginUrl)};`,
@@ -1583,7 +1677,7 @@ export class LibrusAuthService {
         }
         finished = true;
         cleanupSubscription();
-        console.warn(
+        devWarn(
           '🧪 TEST: timeout 120 s — brak URL zalogowania; przeglądarki nie chowam.'
         );
         resolve(false);
@@ -1597,18 +1691,18 @@ export class LibrusAuthService {
         clearTimeout(watchdog);
         cleanupSubscription();
 
-        console.log('🧪 TEST: ✅ Wykryto zalogowanie (loadstop):', loggedInUrl);
+        devLog('🧪 TEST: ✅ Wykryto zalogowanie (loadstop):', loggedInUrl);
         try {
           await this.markSessionActive();
-          console.log('🧪 TEST: marker sesji zapisany.');
-          console.log(`🧪 TEST: SSO → wiadomości (${wiadomTarget})…`);
+          devLog('🧪 TEST: marker sesji zapisany.');
+          devLog(`🧪 TEST: SSO → wiadomości (${wiadomTarget})…`);
           await this.openWiadomosciViaSynergiaSsoBridge(wiadomTarget);
-          console.log(
+          devLog(
             '🧪 TEST: STOP — bez parsowania; IAB bez hide() (zostaje na ekranie).'
           );
           resolve(true);
         } catch (err) {
-          console.warn('🧪 TEST: wyjątek po logowaniu (IAB otwarte):', err);
+          devWarn('🧪 TEST: wyjątek po logowaniu (IAB otwarte):', err);
           resolve(true);
         }
       };
@@ -1617,7 +1711,8 @@ export class LibrusAuthService {
         if (finished || gen !== this.scrapeGeneration) {
           return;
         }
-        console.log(`🧪 TEST loadstop: ${event.url}`);
+        devLog(`🧪 TEST loadstop: ${event.url}`);
+        this.syncDemoRecordingBlurForWebView(event.url);
         if (!this.urlStrictSynergiaSessionForWiadomosciHop(event.url)) {
           return;
         }
@@ -1630,7 +1725,7 @@ export class LibrusAuthService {
 
   // Główna metoda synchronizacji wszystkich danych
   async syncAllData(options?: SyncAllOptions): Promise<SyncResult> {
-    console.log('🔄 Rozpoczynam pełną synchronizację danych...');
+    devLog('🔄 Rozpoczynam pełną synchronizację danych...');
 
     this.domScrapeUiGateDoneForSync = false;
     this.pendingDomScrapeBeginCallback = options?.onDomScrapeBegin;
@@ -1652,7 +1747,7 @@ export class LibrusAuthService {
 
     try {
       if (this.TEST_SYNC_LOGIN_ONLY_NAV_WIADOMOSCI) {
-        console.log(
+        devLog(
           '🧪 TRYB TESTU SYNC (`TEST_SYNC_LOGIN_ONLY_NAV_WIADOMOSCI`): wyłączone oceny/wiadomości/rest. Ustaw `= true` w `librus-auth.ts` na chwilę testu mostka.'
         );
         emit('Tryb testu — oczekiwanie na logowanie…', 50);
@@ -1674,7 +1769,7 @@ export class LibrusAuthService {
       const GRADES_HI = 22;
 
       // 1. Pobierz oceny
-      console.log('📚 Synchronizacja ocen...');
+      devLog('📚 Synchronizacja ocen...');
       emit('Oceny — ładowanie strony w przeglądarce…', GRADES_LO);
       const gradesData = await this.scrapeSection(
         'https://synergia.librus.pl/przegladaj_oceny/uczen',
@@ -1693,7 +1788,7 @@ export class LibrusAuthService {
         }
       );
       
-      console.log(
+      devLog(
         '📦 Surowe dane ocen:',
         gradesData !== null && Array.isArray(gradesData)
           ? `tablica ${gradesData.length} przedmiotów`
@@ -1702,20 +1797,20 @@ export class LibrusAuthService {
       
       if (gradesData !== null && gradesData !== undefined) {
         const grades = this.scraperService.parseGrades(gradesData as any[]);
-        console.log('✅ Sparsowane oceny JSON:', JSON.stringify(grades));
+        devLog('✅ Sparsowane oceny JSON:', JSON.stringify(grades));
         
         const { data: markedGrades, newCount } = await this.storageService.compareAndMarkNew('grades', grades);
         await this.storageService.saveData({ grades: markedGrades });
         result.newGrades = newCount;
-        console.log(`✅ Oceny: ${newCount} nowych, razem ${grades.length} przedmiotów`);
+        devLog(`✅ Oceny: ${newCount} nowych, razem ${grades.length} przedmiotów`);
       } else {
-        console.log('⚠️ Brak danych ocen - scraping zwrócił null/undefined');
+        devLog('⚠️ Brak danych ocen - scraping zwrócił null/undefined');
       }
 
       emit('Oceny — zapis i porównanie…', 24);
 
       // 2. Ogłoszenia i terminarz (Synergia) — przed wejściem w Wiadomości (mostek SSO + skrzynka).
-      console.log('📢 Synchronizacja ogłoszeń...');
+      devLog('📢 Synchronizacja ogłoszeń...');
       emit('Ogłoszenia — ładowanie strony…', 28);
       const announcementsData = await this.scrapeSection(
         'https://synergia.librus.pl/ogloszenia',
@@ -1730,12 +1825,12 @@ export class LibrusAuthService {
         );
         await this.storageService.saveData({ announcements: markedAnnouncements });
         result.newAnnouncements = newCount;
-        console.log(`✅ Ogłoszenia: ${newCount} nowych`);
+        devLog(`✅ Ogłoszenia: ${newCount} nowych`);
       }
 
       emit('Ogłoszenia — zapis…', 34);
 
-      console.log('📅 Synchronizacja terminarza...');
+      devLog('📅 Synchronizacja terminarza...');
       emit('Terminarz — ładowanie strony…', 38);
       const calendarData = await this.scrapeSection(
         'https://synergia.librus.pl/terminarz',
@@ -1750,7 +1845,7 @@ export class LibrusAuthService {
         );
         await this.storageService.saveData({ calendar: markedCalendar });
         result.newEvents = newCount;
-        console.log(`✅ Wydarzenia: ${newCount} nowych`);
+        devLog(`✅ Wydarzenia: ${newCount} nowych`);
       }
 
       emit('Terminarz — zapis…', 44);
@@ -1761,7 +1856,7 @@ export class LibrusAuthService {
       await this.logCapacitorCookieJarKeysBrief('Sync, po przygotowaniu wiadomości');
 
       // 3. Wiadomości — po Synergii: `scrapeSection` odpali mostek (klik „Wiadomości”) gdy potrzeba.
-      console.log('📬 Synchronizacja wiadomości...');
+      devLog('📬 Synchronizacja wiadomości...');
       emit('Wiadomości — pobieranie skrzynki…', 54);
       let messagesData = await this.wiadomosciMsgsApi.tryFetchAllInboxMessagesMappedToScraperShape();
       const messagesFromRestApi = !!messagesData;
@@ -1771,24 +1866,24 @@ export class LibrusAuthService {
           this.scraperService.getMessagesScript()
         );
       } else {
-        console.log(`📬 Wiadomości: pobrano przez REST (bez pełnego scrapu DOM): ${messagesData.length} pozycji`);
+        devLog(`📬 Wiadomości: pobrano przez REST (bez pełnego scrapu DOM): ${messagesData.length} pozycji`);
       }
 
       if (messagesData !== null && messagesData !== undefined) {
-        console.log('📦 Surowe dane wiadomości JSON:', JSON.stringify(messagesData));
+        devLog('📦 Surowe dane wiadomości JSON:', JSON.stringify(messagesData));
         const messages = this.scraperService.parseMessages(messagesData as any[]);
-        console.log('✅ Sparsowane wiadomości JSON:', JSON.stringify(messages));
+        devLog('✅ Sparsowane wiadomości JSON:', JSON.stringify(messages));
         const { data: markedMessages, newCount } = await this.storageService.compareAndMarkNew('messages', messages);
         await this.storageService.saveData({ messages: markedMessages });
         result.newMessages = newCount;
-        console.log(`✅ Wiadomości: ${newCount} nowych, razem ${messages.length}`);
+        devLog(`✅ Wiadomości: ${newCount} nowych, razem ${messages.length}`);
       } else {
-        console.log('⚠️ Brak danych wiadomości - scraping zwrócił null/undefined');
+        devLog('⚠️ Brak danych wiadomości - scraping zwrócił null/undefined');
       }
 
       emit('Wiadomości — zapis…', 66);
 
-      console.log('📝 Synchronizacja uwag...');
+      devLog('📝 Synchronizacja uwag...');
       emit('Uwagi — ładowanie strony…', 70);
       const notesData = await this.scrapeSection(
         'https://wiadomosci.librus.pl/nowy/inbox-notes',
@@ -1800,21 +1895,21 @@ export class LibrusAuthService {
       );
 
       if (notesData !== null && notesData !== undefined) {
-        console.log('📦 Surowe dane uwag JSON:', JSON.stringify(notesData));
+        devLog('📦 Surowe dane uwag JSON:', JSON.stringify(notesData));
         const notes = this.scraperService.parseNotes(notesData as any[]);
-        console.log('✅ Sparsowane uwagi JSON:', JSON.stringify(notes));
+        devLog('✅ Sparsowane uwagi JSON:', JSON.stringify(notes));
         const { data: markedNotes, newCount } = await this.storageService.compareAndMarkNew('notes', notes);
         await this.storageService.saveData({ notes: markedNotes });
         result.newNotes = newCount;
-        console.log(`✅ Uwagi: ${newCount} nowych, razem ${notes.length}`);
+        devLog(`✅ Uwagi: ${newCount} nowych, razem ${notes.length}`);
       } else {
-        console.log('⚠️ Brak danych uwag - scraping zwrócił null/undefined');
+        devLog('⚠️ Brak danych uwag - scraping zwrócił null/undefined');
       }
 
       emit('Uwagi — zapis…', 82);
 
       result.success = true;
-      console.log('🎉 Synchronizacja zakończona sukcesem!');
+      devLog('🎉 Synchronizacja zakończona sukcesem!');
 
       emit('Kończenie — zamykanie przeglądarki…', 92);
 
@@ -1836,7 +1931,7 @@ export class LibrusAuthService {
       if (!errorMsg.includes('logowanie') && !errorMsg.includes('wygasła')) {
         this.closeInAppBrowserAfterSync('błąd synchronizacji (nie logowanie)');
       } else {
-        console.log('🔑 Przeglądarka pozostaje widoczna - wymagane logowanie');
+        devLog('🔑 Przeglądarka pozostaje widoczna - wymagane logowanie');
       }
       
       return result;
@@ -1874,11 +1969,11 @@ export class LibrusAuthService {
           '_blank',
           'location=yes,hidden=no,clearcache=no,clearsessioncache=no,cleardata=no'
         );
-        console.log(`🔑 Brak aktywnej przeglądarki - otwieram logowanie przed synchronizacją: ${url}`);
+        devLog(`🔑 Brak aktywnej przeglądarki - otwieram logowanie przed synchronizacją: ${url}`);
       } else {
         if (url.includes('wiadomosci.librus.pl')) {
           const targetEsc = this.escapeJsSingleQuoted(url);
-          console.log(`🔄 Skrzynka: po łańcuchu SSO dopinam ścieżkę (gdy trzeba): ${url}`);
+          devLog(`🔄 Skrzynka: po łańcuchu SSO dopinam ścieżkę (gdy trzeba): ${url}`);
           this.browser.executeScript({
             code: `(function(){
               var target = '${targetEsc}';
@@ -1894,7 +1989,7 @@ export class LibrusAuthService {
           });
         } else {
           const navUrl = this.getWiadomosciWarmStartUrl(url);
-          console.log(
+          devLog(
             `🔄 Nawiguję do: ${navUrl}${navUrl !== url ? ` (odpycham docelową sekcję: ${url})` : ''}`
           );
           this.browser.executeScript({ code: `window.location.href = '${this.escapeJsSingleQuoted(navUrl)}';` });
@@ -1948,7 +2043,7 @@ export class LibrusAuthService {
           if (scrapingDone || awaitingLogin) {
             return;
           }
-          console.log('⏱️ Timeout podczas scrapingu (executeScript/DOM)');
+          devLog('⏱️ Timeout podczas scrapingu (executeScript/DOM)');
           scrapingDone = true;
           scrapingInProgress = false;
           clearSectionTimeout();
@@ -1975,7 +2070,7 @@ export class LibrusAuthService {
             clearScrapeWatchdog();
             detachScrapeListener();
             this.browser?.hide();
-            console.log('⏱️ Timeout - sekcja nie załadowała się w czasie');
+            devLog('⏱️ Timeout - sekcja nie załadowała się w czasie');
             resolve(null);
           }
         }, 60000);
@@ -1996,8 +2091,8 @@ export class LibrusAuthService {
         if (loginTimeout) {
           clearTimeout(loginTimeout);
         }
-        console.log(`⚠️ ${reason}`);
-        console.log('🔑 Pokazuję okno logowania i czekam na zalogowanie...');
+        devLog(`⚠️ ${reason}`);
+        devLog('🔑 Pokazuję okno logowania i czekam na zalogowanie...');
 
         /** Ponowne logowanie — następny scraping znów ma schować IAB i pokazać preloader w aplikacji. */
         this.domScrapeUiGateDoneForSync = false;
@@ -2011,13 +2106,24 @@ export class LibrusAuthService {
           });
         }
 
+        void (async () => {
+          try {
+            const href = await this.readWebViewLocationHref('');
+            this.syncDemoRecordingBlurForWebView(
+              href && href.length > 0 ? href : 'https://portal.librus.pl/rodzina/synergia/loguj'
+            );
+          } catch {
+            this.syncDemoRecordingBlurForWebView('https://portal.librus.pl/rodzina/synergia/loguj');
+          }
+        })();
+
         loginTimeout = setTimeout(() => {
           if (awaitingLogin && !scrapingDone) {
             scrapingDone = true;
             scrapingInProgress = false;
             clearScrapeWatchdog();
             detachScrapeListener();
-            console.log('⏱️ Timeout logowania ręcznego');
+            devLog('⏱️ Timeout logowania ręcznego');
             this.browser?.hide();
             resolve(null);
           }
@@ -2030,7 +2136,7 @@ export class LibrusAuthService {
         if (scrapingDone) {
           return;
         }
-        console.warn(`📬 Skrzynka / uwagi (wiadomosci/nowy): kończę bez wymuszania logowania — ${reason}`);
+        devWarn(`📬 Skrzynka / uwagi (wiadomosci/nowy): kończę bez wymuszania logowania — ${reason}`);
         awaitingLogin = false;
         if (loginTimeout) {
           clearTimeout(loginTimeout);
@@ -2080,7 +2186,7 @@ export class LibrusAuthService {
               this.targetUsesPortalSsoHop(url) &&
               got.hostname !== want.hostname
             ) {
-              console.log(
+              devLog(
                 '⚠️ Nadal portal po czasie SSO — uruchamiam logowanie:',
                 hrefStr
               );
@@ -2112,7 +2218,7 @@ export class LibrusAuthService {
 
         const librusHttps = this.ensureHttpsLibrusUrl(event.url);
         if (librusHttps !== event.url && this.browser) {
-          console.warn(
+          devWarn(
             '📍 Cleartext na domenie Librus — zamiana na HTTPS:',
             event.url.slice(0, 120)
           );
@@ -2122,7 +2228,7 @@ export class LibrusAuthService {
           return;
         }
 
-        console.log(`📍 Załadowono: ${event.url}`);
+        devLog(`📍 Załadowono: ${event.url}`);
 
         /**
          * Dla celu `wiadomosci.*`: zawsze czytaj faktyczny href — `event.url` bywa przeterminowany
@@ -2132,9 +2238,11 @@ export class LibrusAuthService {
         if (url.includes('wiadomosci.librus.pl')) {
           probeUrl = await this.readWebViewLocationHref(event.url);
           if (probeUrl !== event.url) {
-            console.log(`🔗 WebView faktyczny href (różnica od loadstop): ${probeUrl}`);
+            devLog(`🔗 WebView faktyczny href (różnica od loadstop): ${probeUrl}`);
           }
         }
+
+        this.syncDemoRecordingBlurForWebView(probeUrl);
 
         if (probeUrl.includes('/session-expired')) {
           /** Nawigacja ogłoszeń/ocen może dostać jeszcze loadstop ze starego WebView wiadomości — nie traktować jak Synergii. */
@@ -2145,7 +2253,7 @@ export class LibrusAuthService {
               pu.includes('wiadomosci.librus.pl') &&
               want.includes('synergia.librus.pl')
             ) {
-              console.log(
+              devLog(
                 '📍 Pomijam /session-expired na wiadomosci (stale loadstop przy sync Synergii) →',
                 (() => {
                   try {
@@ -2175,7 +2283,7 @@ export class LibrusAuthService {
          * Skrzynka na innym hoście — pełny mostek Synergia → wiadomości (nie samo `/nowy/`), żeby zgadzała się sesja SPA.
          */
         const completeLoginAndNavigateToSection = async (logLine: string): Promise<void> => {
-          console.log(logLine);
+          devLog(logLine);
           awaitingLogin = false;
           if (loginTimeout) {
             clearTimeout(loginTimeout);
@@ -2186,7 +2294,7 @@ export class LibrusAuthService {
           this.browser?.show();
           startSectionTimeout();
           if (url.includes('wiadomosci.librus.pl')) {
-            console.log(
+            devLog(
               '🔗 Po logowaniu: najpierw łańcuch Synergia → wiadomości, potem docelowa ścieżka skrzynki (przed scrapingiem DOM).'
             );
             loginBridgeBusy = true;
@@ -2244,7 +2352,7 @@ export class LibrusAuthService {
           }
 
           if (this.scrapeTargetPageReady(probeUrl, url)) {
-            console.log(
+            devLog(
               '✅ Po logowaniu jesteśmy na docelowej stronie — rozpoczynam scraping.'
             );
             awaitingLogin = false;
@@ -2256,7 +2364,7 @@ export class LibrusAuthService {
             clearSectionTimeout();
             forceScrapeThisStop = true;
           } else {
-            console.log('⏳ Nadal czekam na zakończenie logowania...');
+            devLog('⏳ Nadal czekam na zakończenie logowania...');
             return;
           }
         }
@@ -2269,12 +2377,12 @@ export class LibrusAuthService {
         if (shouldScrape) {
           clearPortalStuckFallbackTimer();
           if (this.domScrapeRunning) {
-            console.log('⏭️ Scraping DOM już trwa — pomijam duplikat loadstop.');
+            devLog('⏭️ Scraping DOM już trwa — pomijam duplikat loadstop.');
             return;
           }
           this.domScrapeRunning = true;
 
-          console.log(`✅ Na właściwej stronie, wykonuję scraping...`);
+          devLog(`✅ Na właściwej stronie, wykonuję scraping...`);
           clearSectionTimeout();
           scrapingInProgress = true;
           armScrapeWatchdog();
@@ -2300,7 +2408,7 @@ export class LibrusAuthService {
               wrongPathRedirects < 1
             ) {
               wrongPathRedirects += 1;
-              console.log(
+              devLog(
                 '🔁 Inna podstrona w tej samej domenie — ponawiam nawigację do:',
                 url
               );
@@ -2318,7 +2426,7 @@ export class LibrusAuthService {
               !this.scrapeTargetPageReady(currentLocation, url) &&
               !currentLocation.includes('/loguj')
             ) {
-              console.warn(
+              devWarn(
                 '⚠️ Ścieżka WebView nadal różni się od oczekiwanej (limit 1 naprawy). Scrapuję mimo to:',
                 currentLocation
               );
@@ -2377,7 +2485,7 @@ export class LibrusAuthService {
               `
             });
             const diagObj = this.parseBridgeScriptResult(diagnostics?.[0]);
-            console.log('🧪 Diagnostyka strony przed scrapingiem JSON:', JSON.stringify(diagObj));
+            devLog('🧪 Diagnostyka strony przed scrapingiem JSON:', JSON.stringify(diagObj));
 
             const diagRecord =
               diagObj && typeof diagObj === 'object' && !Array.isArray(diagObj)
@@ -2397,7 +2505,7 @@ export class LibrusAuthService {
               return;
             }
 
-            console.log(
+            devLog(
               chunkedGrades
                 ? `🔍 Pobieram oceny (chunkowany transport, jak stary kod: span.grade-box a)...`
                 : `🔍 Wykonuję skrypt JavaScript...`
@@ -2413,9 +2521,9 @@ export class LibrusAuthService {
               parsed = this.parseBridgeScriptResult(result?.[0]);
             }
             if (chunkedGrades && Array.isArray(parsed)) {
-              console.log('📦 Wynik ocen: przedmioty (chunki):', parsed.length);
+              devLog('📦 Wynik ocen: przedmioty (chunki):', parsed.length);
             } else {
-              console.log(
+              devLog(
                 '📦 Wynik skryptu (skrót):',
                 typeof parsed === 'string'
                   ? parsed.slice(0, 400)
@@ -2456,7 +2564,7 @@ export class LibrusAuthService {
             this.targetUsesPortalSsoHop(url) &&
             Date.now() - sectionNavStartedAt < SSO_PORTAL_GRACE_MS;
           if (onPortalEarly) {
-            console.log(
+            devLog(
               '⏳ Portal SSO (pośredni) — czekam na docelową domenę:',
               event.url
             );
@@ -2483,14 +2591,14 @@ export class LibrusAuthService {
       this.scrapeLoadStopSub = subscription ?? null;
 
       if (awaitingLogin) {
-        console.log('⏳ Czekam na ręczne logowanie w widocznej przeglądarce...');
+        devLog('⏳ Czekam na ręczne logowanie w widocznej przeglądarce...');
         loginTimeout = setTimeout(() => {
           if (awaitingLogin && !scrapingDone) {
             scrapingDone = true;
             scrapingInProgress = false;
             clearScrapeWatchdog();
             detachScrapeListener();
-            console.log('⏱️ Timeout logowania ręcznego');
+            devLog('⏱️ Timeout logowania ręcznego');
             this.browser?.hide();
             resolve(null);
           }
@@ -2514,13 +2622,13 @@ export class LibrusAuthService {
                   await this.readWebViewLocationHref('')
                 );
                 if (!hrefKick.includes('wiadomosci.librus.pl')) {
-                  console.log(
+                  devLog(
                     `🔄 Skrzynka: kick ${label} (${delayMs} ms) — jeszcze nie na wiadomosci.pl, pomijam:`,
                     hrefKick.slice(0, 100)
                   );
                   return;
                 }
-                console.log(
+                devLog(
                   `🔄 Skrzynka: kick ${label} (${delayMs} ms) gotowości: ${hrefKick.slice(0, 120)}`
                 );
                 await processScrapeLoadStop({ url: hrefKick } as InAppBrowserEvent);
@@ -2540,8 +2648,8 @@ export class LibrusAuthService {
     
     return new Promise((resolve, reject) => {
 
-      console.log('=== ROZPOCZYNAM SESJĘ ===');
-      console.log('Czy mam zapisaną sesję?', hasValidSession);
+      devLog('=== ROZPOCZYNAM SESJĘ ===');
+      devLog('Czy mam zapisaną sesję?', hasValidSession);
       
       if (!this.browser) {
         const options = hasValidSession 
@@ -2555,12 +2663,12 @@ export class LibrusAuthService {
         );
 
         if (hasValidSession) {
-          console.log('✅ Używam zapisanej sesji - okno ukryte.');
+          devLog('✅ Używam zapisanej sesji - okno ukryte.');
         } else {
-          console.log('❌ Brak sesji - wymagane logowanie ręczne.');
+          devLog('❌ Brak sesji - wymagane logowanie ręczne.');
         }
       } else {
-        console.log('🔄 Przegląarka już istnieje, nawiguję do strony ocen...');
+        devLog('🔄 Przegląarka już istnieje, nawiguję do strony ocen...');
         this.browser.executeScript({ code: "window.location.href = 'https://synergia.librus.pl/przegladaj_oceny/uczen';" });
       }
 
@@ -2568,7 +2676,9 @@ export class LibrusAuthService {
 
       // Reagujemy na każde przeładowanie
       this.browser.on('loadstop').subscribe(async (event: InAppBrowserEvent) => {
-        console.log('📍 Adres URL:', event.url);
+        devLog('📍 Adres URL:', event.url);
+
+        this.syncDemoRecordingBlurForWebView(event.url);
 
         // --- ZABÓJCA OVERLAYÓW (RODO/Cookies) ---
         this.browser?.insertCSS({
@@ -2586,12 +2696,12 @@ export class LibrusAuthService {
 
           if (!scrapingStarted) {
             scrapingStarted = true;
-            console.log('✅ Mamy sesję! Scrapowanie danych...');
+            devLog('✅ Mamy sesję! Scrapowanie danych...');
 
             try {
               const raw = await this.readGradesJsonChunkedFromBrowser();
               const wynik = Array.isArray(raw) ? raw : [];
-              console.log('✅ Sukces! Zapisuję marker sesji.');
+              devLog('✅ Sukces! Zapisuję marker sesji.');
               
               // Zapisujemy marker że sesja jest aktywna (ale NIE cookies, bo są HttpOnly)
               await this.markSessionActive();
@@ -2607,24 +2717,24 @@ export class LibrusAuthService {
         }
         // STAN 2: Zalogowano, przekierowanie na dashboard
         else if (event.url.includes('synergia.librus.pl/uczen/index') || event.url.includes('synergia.librus.pl/rodzina/index')) {
-           console.log('✅ Zalogowano pomyślnie, zapisuję marker sesji...');
+           devLog('✅ Zalogowano pomyślnie, zapisuję marker sesji...');
            await this.markSessionActive();
            this.browser?.hide();
            this.browser?.executeScript({ code: "window.location.href = 'https://synergia.librus.pl/przegladaj_oceny/uczen';" });
         }
         // STAN 3: Wyrzuciło nas do logowania lub landing page (brak sesji)
         else if (event.url.includes('portal.librus.pl/rodzina/synergia/loguj') || event.url.includes('/loguj')) {
-           console.log('⚠️ Przekierowano do logowania - sesja wygasła po stronie serwera.');
-           console.log('🧹 Czyszczę marker sesji...');
+           devLog('⚠️ Przekierowano do logowania - sesja wygasła po stronie serwera.');
+           devLog('🧹 Czyszczę marker sesji...');
            await this.clearSession();
-           console.log('👤 Wymagane ponowne logowanie ręczne.');
+           devLog('👤 Wymagane ponowne logowanie ręczne.');
            this.browser?.show();
            scrapingStarted = false;
         }
         // STAN 4: Portal landing (możliwa wygasła sesja)
         else if (event.url.includes('portal.librus.pl') && !event.url.includes('/loguj')) {
-           console.log('⚠️ Portal landing page - prawdopodobnie sesja wygasła.');
-           console.log('Pokazuję okno, możesz kliknąć "Zaloguj przez Synergia"');
+           devLog('⚠️ Portal landing page - prawdopodobnie sesja wygasła.');
+           devLog('Pokazuję okno, możesz kliknąć "Zaloguj przez Synergia"');
            this.browser?.show();
            scrapingStarted = false;
         }
@@ -2632,9 +2742,9 @@ export class LibrusAuthService {
 
       // Obsługa zamknięcia przeglądarki
       this.browser.on('exit').subscribe(() => {
-        console.log('⚠️ Przeglądarka została zamknięta przez użytkownika.');
+        devLog('⚠️ Przeglądarka została zamknięta przez użytkownika.');
+        this.clearDemoIabBlurRetries();
         this.browser = null;
-        // NIE czyścimy sesji automatycznie - user może chcieć otworzyć ponownie
         // Sesja zostanie wyczyszczona tylko przy:
         // 1. Manualnym wylogowaniu (forceLogout)
         // 2. Przekierowaniu do logowania (expired session)
@@ -2658,7 +2768,7 @@ export class LibrusAuthService {
         value: JSON.stringify(sessionData)
       });
 
-      console.log('✅ Marker sesji zapisany.');
+      devLog('✅ Marker sesji zapisany.');
     } catch (error) {
       console.error('❌ Błąd zapisywania markera sesji:', error);
     }

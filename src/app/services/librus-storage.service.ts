@@ -3,6 +3,7 @@ import { Preferences } from '@capacitor/preferences';
 import { LibrusData, GradesBySubject, Message, Note, Announcement, CalendarEvent, Grade } from '../models/librus-data.models';
 import { enrichCalendarEvent } from '../utils/calendar-parse';
 import { deriveGradeDateISO } from '../utils/grade-semester';
+import { devLog } from '../utils/dev-log';
 
 @Injectable({
   providedIn: 'root'
@@ -26,7 +27,7 @@ export class LibrusStorageService {
         value: JSON.stringify(updated)
       });
 
-      console.log('💾 Dane zapisane do storage');
+      devLog('💾 Dane zapisane do storage');
     } catch (error) {
       console.error('❌ Błąd zapisywania danych:', error);
       throw error;
@@ -65,7 +66,7 @@ export class LibrusStorageService {
 
   async clearData(): Promise<void> {
     await Preferences.remove({ key: this.STORAGE_KEY });
-    console.log('🗑️ Dane wyczyszczone');
+    devLog('🗑️ Dane wyczyszczone');
   }
 
   /** Uzupełnij jedną wiadomość (np. treść z API po kliknięciu) */

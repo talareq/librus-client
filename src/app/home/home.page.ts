@@ -6,6 +6,8 @@ import { LibrusAuthService } from '../services/librus-auth';
 import { LibrusStorageService } from '../services/librus-storage.service';
 import { GradesBySubject, Message, Note, Announcement, CalendarEvent, Grade, SyncProgress } from '../models/librus-data.models';
 import { buildGradesSemesterSections, type GradesSemesterSection } from '../utils/grade-semester';
+import { demoRedactLine, demoRedactMultiline } from '../utils/demo-privacy';
+import { devLog } from '../utils/dev-log';
 
 @Component({
   selector: 'app-home',
@@ -88,14 +90,14 @@ export class HomePage implements OnInit {
   }
 
   async checkSession() {
-    console.log('🔍 HomePage: Sprawdzam status sesji...');
+    devLog('🔍 HomePage: Sprawdzam status sesji...');
     this.hasSession = await this.authService.checkSessionValid();
     if (this.hasSession) {
       this.wynik = 'Sesja aktywna. Możesz zsynchronizować dane bez logowania.';
-      console.log('✅ HomePage: Sesja aktywna');
+      devLog('✅ HomePage: Sesja aktywna');
     } else {
       this.wynik = 'Brak aktywnej sesji. Po kliknięciu zostaniesz poproszony o zalogowanie.';
-      console.log('❌ HomePage: Brak sesji');
+      devLog('❌ HomePage: Brak sesji');
     }
   }
 
@@ -108,7 +110,7 @@ export class HomePage implements OnInit {
       'Synchronizacja w toku… Jeśli pojawi się okno przeglądarki Librus, zaloguj się; po zalogowaniu zobaczysz postęp pobierania danych.';
 
     try {
-      console.log('🔄 HomePage: Rozpoczynam synchronizację...');
+      devLog('🔄 HomePage: Rozpoczynam synchronizację...');
       const result = await this.authService.syncAllData({
         onProgress: (p: SyncProgress) => {
           this.ngZone.run(() => {
@@ -126,17 +128,17 @@ export class HomePage implements OnInit {
         }
       });
       
-      console.log('📊 Wynik synchronizacji JSON:', JSON.stringify(result));
+      devLog('📊 Wynik synchronizacji JSON:', JSON.stringify(result));
       
       if (result.success) {
         await this.loadData();
         
-        console.log('📚 Załadowane dane:');
-        console.log('  - Oceny:', this.grades.length, 'przedmiotów');
-        console.log('  - Wiadomości:', this.messages.length);
-        console.log('  - Uwagi:', this.notes.length);
-        console.log('  - Ogłoszenia:', this.announcements.length);
-        console.log('  - Wydarzenia:', this.calendarEvents.length);
+        devLog('📚 Załadowane dane:');
+        devLog('  - Oceny:', this.grades.length, 'przedmiotów');
+        devLog('  - Wiadomości:', this.messages.length);
+        devLog('  - Uwagi:', this.notes.length);
+        devLog('  - Ogłoszenia:', this.announcements.length);
+        devLog('  - Wydarzenia:', this.calendarEvents.length);
         
         const newTotal = result.newGrades + result.newMessages + result.newNotes + 
                         result.newAnnouncements + result.newEvents;
@@ -416,28 +418,28 @@ export class HomePage implements OnInit {
   async debugCookies() {
     try {
       const sessionValid = await this.authService.checkSessionValid();
-      console.log('=== DEBUG SESSION ===');
-      console.log('Czy sesja jest ważna?', sessionValid);
+      devLog('=== DEBUG SESSION ===');
+      devLog('Czy sesja jest ważna?', sessionValid);
       
       const debugInfo = await (this.authService as any).debugSavedCookies();
-      console.log('Info o session:', debugInfo);
+      devLog('Info o session:', debugInfo);
       
       const data = await this.storageService.getData();
-      console.log('=== DEBUG STORAGE ===');
-      console.log('Liczba przedmiotów z ocenami:', data.grades.length);
-      console.log('Oceny szczegółowo:', data.grades);
-      console.log('Liczba wiadomości:', data.messages.length);
-      console.log('Wiadomości:', data.messages);
-      console.log('Liczba uwag:', data.notes.length);
-      console.log('Liczba ogłoszeń:', data.announcements.length);
-      console.log('Liczba wydarzeń:', data.calendar.length);
-      console.log('Ostatnia synchronizacja:', data.lastSync ? new Date(data.lastSync).toLocaleString() : 'nigdy');
+      devLog('=== DEBUG STORAGE ===');
+      devLog('Liczba przedmiotów z ocenami:', data.grades.length);
+      devLog('Oceny szczegółowo:', data.grades);
+      devLog('Liczba wiadomości:', data.messages.length);
+      devLog('Wiadomości:', data.messages);
+      devLog('Liczba uwag:', data.notes.length);
+      devLog('Liczba ogłoszeń:', data.announcements.length);
+      devLog('Liczba wydarzeń:', data.calendar.length);
+      devLog('Ostatnia synchronizacja:', data.lastSync ? new Date(data.lastSync).toLocaleString() : 'nigdy');
       
       // Sprawdź też surowe dane z Preferences
       const { Preferences } = await import('@capacitor/preferences');
       const { value } = await Preferences.get({ key: 'librus_data' });
-      console.log('=== RAW STORAGE ===');
-      console.log('Surowe dane:', value);
+      devLog('=== RAW STORAGE ===');
+      devLog('Surowe dane:', value);
       
       alert('✅ Debug info wyświetlony w konsoli/logcat.\n\n' +
             `Oceny: ${data.grades.length} przedmiotów\n` +
@@ -465,5 +467,14 @@ export class HomePage implements OnInit {
     if (!dateString) return '';
     const date = new Date(dateString);
     return date.toLocaleDateString('pl-PL');
+  }
+
+  /** Redakcja na nagranie demo (environment.demoRecordingPrivacy). */
+  demoLine(value: string | null | undefined): string {
+    return demoRedactLine(value);
+  }
+
+  demoMulti(value: string | null | undefined): string {
+    return demoRedactMultiline(value);
   }
 }

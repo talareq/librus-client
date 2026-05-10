@@ -17,6 +17,9 @@ log.txt
 /.versions
 /coverage
 
+# Local tool deps (e.g. Pillow installed with pip --target)
+.demo-tools/
+
 # Ionic
 /.ionic
 /www

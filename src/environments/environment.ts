@@ -5,6 +5,11 @@
 /** Sprawdzanie wersji względem package.json na gałęzi main — wyłączone w dev (npm start). */
 export const environment = {
   production: false,
+  /**
+   * Tymczasowo na nagranie demo: rozmycie pól logowania w InAppBrowser + redakcja nazw/tekstów w UI.
+   * Po nagraniu ustaw `false` i przebuduj aplikację.
+   */
+  demoRecordingPrivacy: true,
   versionCheck: {
     enabled: false,
     packageJsonUrl:
