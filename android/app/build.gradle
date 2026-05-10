@@ -1,5 +1,30 @@
 apply plugin: 'com.android.application'
 
+/** Wersja z ../../package.json; opcjonalne nadpisania CI: ANDROID_VERSION_NAME, ANDROID_VERSION_CODE */
+def packageJsonFile = file('../../package.json')
+def pkgJson = new groovy.json.JsonSlurper().parseText(packageJsonFile.text)
+def pkgVersion = pkgJson.version?.toString() ?: '0.0.0'
+def envVersionName = System.getenv('ANDROID_VERSION_NAME')
+def envVersionCode = System.getenv('ANDROID_VERSION_CODE')
+def computedVersionName = envVersionName ?: pkgVersion
+def computedVersionCode
+if (envVersionCode != null && envVersionCode.matches("\\d+")) {
+    computedVersionCode = envVersionCode as int
+} else {
+    def core = computedVersionName.tokenize('-')[0]
+    def segs = core.tokenize('.')
+    def maj = segs[0] ? segs[0] as int : 0
+    def min = segs.size() > 1 ? segs[1] as int : 0
+    def pat = 0
+    if (segs.size() > 2) {
+        def m = (segs[2] =~ /^(\d+)/)
+        if (m.find()) {
+            pat = m.group(1) as int
+        }
+    }
+    computedVersionCode = maj * 10000 + min * 100 + pat
+}
+
 android {
     namespace = "io.ionic.starter"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +32,8 @@ android {
         applicationId "io.ionic.starter"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode computedVersionCode
+        versionName computedVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -1,0 +1,74 @@
+# Buduje aplikację (Angular → Capacitor) i pakuje debug APK do pobrania z zakładki Actions.
+# Debug APK można zainstalować na własne urządzenie (opcje deweloperskie / unknown sources).
+# AAB/APK pod Google Play wymaga osobnego release signing (keystore w GitHub Secrets).
+
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          log-accepted-sdk-licenses: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wersjonowanie (CI)
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "ANDROID_VERSION_NAME=$V" >> "$GITHUB_ENV"
+          # Rosnący numer pod kolejne buildy (powyżej typowego wyniku semver→versionCode)
+          echo "ANDROID_VERSION_CODE=$((100000 + ${{ github.run_number }}))" >> "$GITHUB_ENV"
+          echo "Building version $V (versionCode $((100000 + ${{ github.run_number }})))"
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Capacitor sync (Android)
+        run: npx cap sync android
+
+      - name: Gradle assembleDebug
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK artifact
+        if: ${{ !github.event.pull_request || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: librus-client-${{ env.ANDROID_VERSION_NAME }}-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

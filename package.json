@@ -1,12 +1,14 @@
 {
   "name": "librus-client",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ionic Framework",
   "homepage": "https://ionicframework.com/",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "sync-version": "node scripts/sync-native-versions.mjs",
+    "version": "node scripts/sync-native-versions.mjs && git add ios/App/App.xcodeproj/project.pbxproj",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint"
