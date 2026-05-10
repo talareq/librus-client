@@ -86,3 +86,21 @@ export interface SyncResult {
   newEvents: number;
   error?: string;
 }
+
+/** Raportowanie postępu pełnej synchronizacji (UI: preloader + pasek). */
+export interface SyncProgress {
+  /** 0–100 */
+  percent: number;
+  message: string;
+}
+
+/** Opcje `syncAllData` — callbacki dla UI. */
+export interface SyncAllOptions {
+  onProgress?: (p: SyncProgress) => void;
+  /**
+   * Wywoływane raz, gdy sesja jest już OK i zaczyna się odczyt DOM w WebView.
+   * Tutaj można pokazać preloader w aplikacji — tu też chowamy InAppBrowser,
+   * żeby nakładka nie była zasłonięta przez okno Librusa.
+   */
+  onDomScrapeBegin?: () => void;
+}

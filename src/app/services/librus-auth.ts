@@ -6,7 +6,7 @@ import { Preferences } from '@capacitor/preferences';
 import { LibrusScraperService } from './librus-scraper.service';
 import { LibrusStorageService } from './librus-storage.service';
 import { WiadomosciMessagesApiService } from './wiadomosci-messages-api.service';
-import { SyncResult, Message } from '../models/librus-data.models';
+import { SyncResult, SyncProgress, SyncAllOptions, Message } from '../models/librus-data.models';
 
 interface CookieData {
   url: string;
@@ -33,6 +33,32 @@ export class LibrusAuthService {
   private scrapeGeneration = 0;
   /** Cordova może wyemitować wiele loadstop na jednym fragmencie SPA — jedna sesja DOM scrapingu naraz. */
   private domScrapeRunning = false;
+  /** Jednorazowo na cały `syncAllData`: schowanie IAB + sygnał dla UI, gdy zaczyna się pierwszy odczyt DOM po logowaniu. */
+  private domScrapeUiGateDoneForSync = false;
+  private pendingDomScrapeBeginCallback: (() => void) | undefined;
+
+  /**
+   * Chowamy InAppBrowser (inaczej preloader w WebView jest niewidoczny) i informujemy UI o starcie
+   * faktycznego scrapowania — wywołanie tylko raz na całą synchronizację.
+   */
+  private domScrapeBeginGateOnce(): void {
+    if (this.domScrapeUiGateDoneForSync) {
+      return;
+    }
+    this.domScrapeUiGateDoneForSync = true;
+    try {
+      this.browser?.hide();
+      console.log('👁️ InAppBrowser ukryty — w tle odczyt DOM; w aplikacji widać preloader.');
+    } catch {
+      /* noop */
+    }
+    try {
+      this.pendingDomScrapeBeginCallback?.();
+    } catch {
+      /* noop */
+    }
+  }
+
   private readonly COOKIE_STORAGE_KEY = 'librus_session_cookies';
   /** Czas ważności markera w Preferencjach (nie równa się TTL cookies HttpOnly w WebView). */
   private readonly SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 dni
@@ -468,7 +494,9 @@ export class LibrusAuthService {
    * Pobiera JSON ocen przez małe kawalki (`window.__LIBR_GR`): ten sam DOM co stary kod (`span.grade-box a`),
    * bez pojedynczego gigantycznego zwrotu z `executeScript`.
    */
-  private async readGradesJsonChunkedFromBrowser(): Promise<any[] | null> {
+  private async readGradesJsonChunkedFromBrowser(
+    onChunk?: (index: number, total: number) => void
+  ): Promise<any[] | null> {
     const bootstrap = await this.browser?.executeScript({
       code: this.scraperService.getGradesChunkBootstrapScript()
     });
@@ -491,6 +519,7 @@ export class LibrusAuthService {
 
     let buf = '';
     for (let i = 0; i < parts; i++) {
+      onChunk?.(i, parts);
       const chunk = await this.browser?.executeScript({
         code: `(function(){ try { var w = window.__LIBR_GR || []; var s = w[${i}]; return JSON.stringify(typeof s === 'string' ? s : ''); } catch (e) { return JSON.stringify(''); } })();`
       });
@@ -1600,8 +1629,17 @@ export class LibrusAuthService {
   }
 
   // Główna metoda synchronizacji wszystkich danych
-  async syncAllData(): Promise<SyncResult> {
+  async syncAllData(options?: SyncAllOptions): Promise<SyncResult> {
     console.log('🔄 Rozpoczynam pełną synchronizację danych...');
+
+    this.domScrapeUiGateDoneForSync = false;
+    this.pendingDomScrapeBeginCallback = options?.onDomScrapeBegin;
+
+    const onProgress = options?.onProgress;
+    const emit = (message: string, percent: number): void => {
+      const pct = Math.min(100, Math.max(0, Math.round(percent)));
+      onProgress?.({ message, percent: pct });
+    };
     
     const result: SyncResult = {
       success: false,
@@ -1617,20 +1655,42 @@ export class LibrusAuthService {
         console.log(
           '🧪 TRYB TESTU SYNC (`TEST_SYNC_LOGIN_ONLY_NAV_WIADOMOSCI`): wyłączone oceny/wiadomości/rest. Ustaw `= true` w `librus-auth.ts` na chwilę testu mostka.'
         );
+        emit('Tryb testu — oczekiwanie na logowanie…', 50);
         result.success =
           await this.waitForLoginEventThenOpenWiadomoscKeepBrowser();
         if (!result.success) {
           result.error = 'TEST: brak URL zalogowania w 120 s';
         }
+        emit(
+          result.success ? 'Test zakończony.' : 'Test — przekroczono czas.',
+          100
+        );
         return result;
       }
 
+      emit('Rozpoczynam synchronizację…', 0);
+
+      const GRADES_LO = 2;
+      const GRADES_HI = 22;
+
       // 1. Pobierz oceny
       console.log('📚 Synchronizacja ocen...');
+      emit('Oceny — ładowanie strony w przeglądarce…', GRADES_LO);
       const gradesData = await this.scrapeSection(
         'https://synergia.librus.pl/przegladaj_oceny/uczen',
         this.scraperService.getGradesScript(),
-        { chunkedGrades: true }
+        {
+          chunkedGrades: true,
+          onGradesChunkProgress: (index, parts) => {
+            const span = GRADES_HI - GRADES_LO;
+            const pct =
+              GRADES_LO + (span * (index + 1)) / Math.max(1, parts);
+            emit(
+              `Oceny — pobieranie pakietu ${index + 1} z ${parts}…`,
+              pct
+            );
+          }
+        }
       );
       
       console.log(
@@ -1652,8 +1712,11 @@ export class LibrusAuthService {
         console.log('⚠️ Brak danych ocen - scraping zwrócił null/undefined');
       }
 
+      emit('Oceny — zapis i porównanie…', 24);
+
       // 2. Ogłoszenia i terminarz (Synergia) — przed wejściem w Wiadomości (mostek SSO + skrzynka).
       console.log('📢 Synchronizacja ogłoszeń...');
+      emit('Ogłoszenia — ładowanie strony…', 28);
       const announcementsData = await this.scrapeSection(
         'https://synergia.librus.pl/ogloszenia',
         this.scraperService.getAnnouncementsScript()
@@ -1670,7 +1733,10 @@ export class LibrusAuthService {
         console.log(`✅ Ogłoszenia: ${newCount} nowych`);
       }
 
+      emit('Ogłoszenia — zapis…', 34);
+
       console.log('📅 Synchronizacja terminarza...');
+      emit('Terminarz — ładowanie strony…', 38);
       const calendarData = await this.scrapeSection(
         'https://synergia.librus.pl/terminarz',
         this.scraperService.getCalendarScript()
@@ -1687,12 +1753,16 @@ export class LibrusAuthService {
         console.log(`✅ Wydarzenia: ${newCount} nowych`);
       }
 
+      emit('Terminarz — zapis…', 44);
+
+      emit('Wiadomości — synchronizacja ciasteczek i sesji…', 48);
       await this.prepareWiadomosciCapacitorCookiesAfterSynergia();
       await this.warmupWiadomosciCordovaCookiesAfterSynergia();
       await this.logCapacitorCookieJarKeysBrief('Sync, po przygotowaniu wiadomości');
 
       // 3. Wiadomości — po Synergii: `scrapeSection` odpali mostek (klik „Wiadomości”) gdy potrzeba.
       console.log('📬 Synchronizacja wiadomości...');
+      emit('Wiadomości — pobieranie skrzynki…', 54);
       let messagesData = await this.wiadomosciMsgsApi.tryFetchAllInboxMessagesMappedToScraperShape();
       const messagesFromRestApi = !!messagesData;
       if (!messagesData) {
@@ -1716,7 +1786,10 @@ export class LibrusAuthService {
         console.log('⚠️ Brak danych wiadomości - scraping zwrócił null/undefined');
       }
 
+      emit('Wiadomości — zapis…', 66);
+
       console.log('📝 Synchronizacja uwag...');
+      emit('Uwagi — ładowanie strony…', 70);
       const notesData = await this.scrapeSection(
         'https://wiadomosci.librus.pl/nowy/inbox-notes',
         this.scraperService.getNotesScript(),
@@ -1738,12 +1811,18 @@ export class LibrusAuthService {
         console.log('⚠️ Brak danych uwag - scraping zwrócił null/undefined');
       }
 
+      emit('Uwagi — zapis…', 82);
+
       result.success = true;
       console.log('🎉 Synchronizacja zakończona sukcesem!');
+
+      emit('Kończenie — zamykanie przeglądarki…', 92);
 
       await this.markSessionActive();
 
       this.closeInAppBrowserAfterSync('sukces synchronizacji');
+
+      emit('Synchronizacja zakończona.', 100);
       
       return result;
 
@@ -1761,6 +1840,8 @@ export class LibrusAuthService {
       }
       
       return result;
+    } finally {
+      this.pendingDomScrapeBeginCallback = undefined;
     }
   }
 
@@ -1768,7 +1849,11 @@ export class LibrusAuthService {
   private async scrapeSection(
     url: string,
     script: string,
-    options?: { chunkedGrades?: boolean; skipWiadomosciSsoBridge?: boolean }
+    options?: {
+      chunkedGrades?: boolean;
+      skipWiadomosciSsoBridge?: boolean;
+      onGradesChunkProgress?: (index: number, total: number) => void;
+    }
   ): Promise<any> {
     if (
       this.browser &&
@@ -1913,6 +1998,9 @@ export class LibrusAuthService {
         }
         console.log(`⚠️ ${reason}`);
         console.log('🔑 Pokazuję okno logowania i czekam na zalogowanie...');
+
+        /** Ponowne logowanie — następny scraping znów ma schować IAB i pokazać preloader w aplikacji. */
+        this.domScrapeUiGateDoneForSync = false;
 
         /** Nie czyścimy Preferences — HttpOnly i tak siedzą w WebView; clearSession() psuł UX (ciągłe „wylogowanie”). */
         this.browser?.show();
@@ -2192,6 +2280,7 @@ export class LibrusAuthService {
           armScrapeWatchdog();
 
           try {
+            this.domScrapeBeginGateOnce();
             await new Promise(r => setTimeout(r, 2000));
 
             let currentLocation = await this.readWebViewLocationHref(event.url);
@@ -2316,7 +2405,9 @@ export class LibrusAuthService {
 
             let parsed: unknown;
             if (chunkedGrades) {
-              parsed = await this.readGradesJsonChunkedFromBrowser();
+              parsed = await this.readGradesJsonChunkedFromBrowser(
+                options?.onGradesChunkProgress
+              );
             } else {
               const result = await this.browser?.executeScript({ code: script });
               parsed = this.parseBridgeScriptResult(result?.[0]);

@@ -29,6 +29,31 @@
   </ion-toolbar>
 </ion-header>
 
+<ion-modal
+  class="sync-preloader-modal"
+  [isOpen]="syncOverlayVisible"
+  [backdropDismiss]="false"
+  role="status"
+  aria-live="polite"
+  aria-busy="true">
+  <ng-template>
+    <ion-content class="sync-preloader-modal-body" [fullscreen]="true" [scrollY]="false">
+      <div class="sync-preloader-stack">
+        <div class="sync-preloader-card">
+          <ion-spinner name="crescent" color="primary"></ion-spinner>
+          <h2 class="sync-preloader-title">Synchronizacja</h2>
+          <p class="sync-preloader-message">{{ syncProgressMessage }}</p>
+          <ion-progress-bar [value]="syncProgressPercent / 100" color="primary"></ion-progress-bar>
+          <p class="sync-preloader-percent">{{ syncProgressPercent }}%</p>
+          <p class="sync-preloader-hint">
+            To okno pojawia się po zalogowaniu i znika po zakończeniu ostatniego scrapowania. Nie zamykaj aplikacji.
+          </p>
+        </div>
+      </div>
+    </ion-content>
+  </ng-template>
+</ion-modal>
+
 <ion-content [fullscreen]="true">
   
   <!-- Status message -->

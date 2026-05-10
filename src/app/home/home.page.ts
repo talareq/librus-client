@@ -1,10 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IonicModule } from '@ionic/angular';
 import { LibrusAuthService } from '../services/librus-auth';
 import { LibrusStorageService } from '../services/librus-storage.service';
-import { GradesBySubject, Message, Note, Announcement, CalendarEvent, Grade } from '../models/librus-data.models';
+import { GradesBySubject, Message, Note, Announcement, CalendarEvent, Grade, SyncProgress } from '../models/librus-data.models';
 import { buildGradesSemesterSections, type GradesSemesterSection } from '../utils/grade-semester';
 
 @Component({
@@ -16,6 +16,10 @@ import { buildGradesSemesterSections, type GradesSemesterSection } from '../util
 })
 export class HomePage implements OnInit {
   isLoading = false;
+  /** Pełnoekranowy preloader z paskiem postępu tylko podczas Sync (nie przy wylogowaniu). */
+  syncOverlayVisible = false;
+  syncProgressPercent = 0;
+  syncProgressMessage = '';
   wynik = 'Kliknij przycisk aby zsynchronizować dane.';
   hasSession = false;
 
@@ -62,7 +66,8 @@ export class HomePage implements OnInit {
 
   constructor(
     private authService: LibrusAuthService,
-    private storageService: LibrusStorageService
+    private storageService: LibrusStorageService,
+    private ngZone: NgZone
   ) {}
 
   async ngOnInit() {
@@ -96,12 +101,30 @@ export class HomePage implements OnInit {
 
   async syncAll() {
     this.isLoading = true;
+    this.syncOverlayVisible = false;
+    this.syncProgressPercent = 0;
+    this.syncProgressMessage = '';
     this.wynik =
-      'Synchronizacja w toku… Jeśli pojawi się okno przeglądarki Librus, zaloguj się i poczekaj na zakończenie.';
+      'Synchronizacja w toku… Jeśli pojawi się okno przeglądarki Librus, zaloguj się; po zalogowaniu zobaczysz postęp pobierania danych.';
 
     try {
       console.log('🔄 HomePage: Rozpoczynam synchronizację...');
-      const result = await this.authService.syncAllData();
+      const result = await this.authService.syncAllData({
+        onProgress: (p: SyncProgress) => {
+          this.ngZone.run(() => {
+            this.syncProgressPercent = p.percent;
+            this.syncProgressMessage = p.message;
+          });
+        },
+        onDomScrapeBegin: () => {
+          this.ngZone.run(() => {
+            this.syncOverlayVisible = true;
+            if (!this.syncProgressMessage.trim()) {
+              this.syncProgressMessage = 'Pobieranie danych z Librusa…';
+            }
+          });
+        }
+      });
       
       console.log('📊 Wynik synchronizacji JSON:', JSON.stringify(result));
       
@@ -152,6 +175,7 @@ export class HomePage implements OnInit {
       this.hasSession = false;
     } finally {
       this.isLoading = false;
+      this.syncOverlayVisible = false;
       await this.checkSession();
     }
   }
