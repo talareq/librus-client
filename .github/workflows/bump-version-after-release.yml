@@ -1,0 +1,53 @@
+# Po opublikowaniu GitHub Release: podbija patch w package.json (następna wersja dev),
+# synchronizuje numer w iOS (project.pbxproj) i wypycha commit na domyślną gałąź.
+# Commit ma [skip ci] — workflow „Build Android APK” go pomija (bez pętli).
+#
+# Wymaga: Settings → Actions → General → Workflow permissions = „Read and write permissions”.
+
+name: Bump version after release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch (package.json + package-lock.json)
+        run: npm version patch --no-git-tag-version
+
+      - name: Sync iOS version from package.json
+        run: node scripts/sync-native-versions.mjs
+
+      - name: Commit and push
+        env:
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          NEW=$(node -p "require('./package.json').version")
+          git add package.json package-lock.json ios/App/App.xcodeproj/project.pbxproj
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: bump version to ${NEW} after release ${{ github.event.release.tag_name }} [skip ci]"
+          git push origin "HEAD:${BRANCH}"

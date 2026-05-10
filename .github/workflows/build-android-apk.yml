@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   apk:
+    if: ${{ github.event_name != 'push' || github.event.head_commit == null || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,7 +42,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          log-accepted-sdk-licenses: true
+          accept-android-sdk-licenses: true
 
       - name: Install dependencies
         run: npm ci

@@ -93,6 +93,48 @@ For local setup and testing, see [`SETUP.md`](./SETUP.md) and [`TESTING_GUIDE.md
 
 ---
 
+## Pre-built debug APK (GitHub Actions)
+
+[![Build Android APK](https://github.com/talareq/librus-client/actions/workflows/build-android-apk.yml/badge.svg?branch=main)](https://github.com/talareq/librus-client/actions/workflows/build-android-apk.yml)
+[![Release APK](https://github.com/talareq/librus-client/actions/workflows/release-apk.yml/badge.svg)](https://github.com/talareq/librus-client/actions/workflows/release-apk.yml)
+
+### Stable download (`latest` release)
+
+After at least one **tagged release** (see below), the newest **debug** APK is always at:
+
+**[https://github.com/talareq/librus-client/releases/latest/download/librus-client.apk](https://github.com/talareq/librus-client/releases/latest/download/librus-client.apk)**
+
+(If this returns 404, no release has been published yet.) All builds are **debug** APKs for local testing, not Play Store listings.
+
+**Cut a release:** align `package.json` `version` with the tag (e.g. `0.2.0` → tag `v0.2.0`), commit to `main`, then:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The [`release-apk`](.github/workflows/release-apk.yml) workflow builds the app and attaches **`librus-client.apk`** to that GitHub Release. Publishing the release also triggers the post-release version bump on `main` (see [`.github/workflows/bump-version-after-release.yml`](.github/workflows/bump-version-after-release.yml)).
+
+### CI artifacts (every push to `main`)
+
+On each successful run, CI produces a **debug** `app-debug.apk` (installable for local testing; not a Play Store release build).
+
+#### How to download from a workflow run
+
+1. Open **[Build Android APK — workflow runs](https://github.com/talareq/librus-client/actions/workflows/build-android-apk.yml)** (all runs for this workflow on `main`).
+2. Select the **latest run with a green checkmark** (e.g. [a successful run summary](https://github.com/talareq/librus-client/actions/runs/25622334922)).
+3. On the run page, open the **Summary** tab.
+4. In **Artifacts**, download the zip (name pattern `librus-client-<version>-<run>`).
+5. Unzip the archive — the installable file is **`app-debug.apk`**.
+
+You can also trigger a fresh build manually from the workflow page (**Run workflow**).
+
+#### Notes on Actions artifacts
+
+GitHub Actions **does not** offer a permalink that always points at a specific artifact across runs; each artifact belongs to one run and **expires** (currently **30 days** in [`build-android-apk.yml`](.github/workflows/build-android-apk.yml)). Prefer the **[latest release download](#stable-download-latest-release)** link above for a durable URL.
+
+---
+
 ## Disclaimer
 
 **This project is unofficial, non-affiliated, and not endorsed by Librus, Synergia, or any related vendor.**  
