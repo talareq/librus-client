@@ -19,6 +19,10 @@ on:
         description: "Semver zgodny z package.json (np. 0.1.0), bez prefiksu v"
         required: true
         type: string
+      commit_sha:
+        description: "Opcjonalnie: pełny SHA commita (łańcuch CI); puste = HEAD wybranej gałęzi"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -29,6 +33,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # workflow_dispatch: API wymaga ref=branch/tag — dokładny commit z łańcucha przekazujemy tutaj.
+          ref: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.commit_sha != '') && github.event.inputs.commit_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

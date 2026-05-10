@@ -58,13 +58,19 @@ jobs:
               return;
             }
 
+            // createWorkflowDispatch: pole ref musi być gałęzią lub tagiem (nie samym SHA).
+            const branch = run.head_branch;
+            if (!branch) {
+              core.setFailed("Brak head_branch w workflow_run — nie można wywołać release.");
+              return;
+            }
             await github.rest.actions.createWorkflowDispatch({
               owner,
               repo,
               workflow_id: "release-apk.yml",
-              ref: sha,
-              inputs: { version },
+              ref: branch,
+              inputs: { version, commit_sha: sha },
             });
             core.notice(
-              `Wywołano release-apk.yml dla wersji ${version} (ref ${sha.slice(0, 7)})`
+              `Wywołano release-apk.yml dla wersji ${version} (branch ${branch}, commit ${sha.slice(0, 7)})`
             );
