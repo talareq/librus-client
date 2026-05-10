@@ -1,9 +1,11 @@
-# Buduje debug APK i dołącza do GitHub Release dla taga semver (np. v0.1.0).
+# Buduje debug APK i dołącza do GitHub Release pod tagiem semver (np. v0.1.0).
 # Zasób ma stałą nazwę librus-client.apk → adres:
 # https://github.com/<owner>/<repo>/releases/latest/download/librus-client.apk
+# (działa dopiero gdy istnieje co najmniej jedno opublikowane release).
 #
-# Jak wydać wersję: ustaw "version" w package.json (np. 0.1.0), commit na main,
-# git tag v0.1.0 && git push origin v0.1.0
+# Sposoby uruchomienia:
+# - Ręcznie: Actions → „Release debug APK” → Run workflow (pole = version z package.json, bez „v”).
+# - Z CLI: ustaw version w package.json, commit, potem git tag v0.1.0 && git push origin v0.1.0
 
 name: Release debug APK
 
@@ -11,6 +13,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver zgodny z package.json (np. 0.1.0), bez prefiksu v"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -42,6 +50,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Ustal tag release
+        id: rel
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+            V="${V#v}"
+            PJ=$(node -p "require('./package.json').version")
+            if [ "$V" != "$PJ" ]; then
+              echo "::error::Wersja z inputu ($V) musi być równa package.json ($PJ)."
+              exit 1
+            fi
+            echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Wersjonowanie (CI)
         run: |
           V=$(node -p "require('./package.json').version")
@@ -64,6 +88,7 @@ jobs:
       - name: GitHub Release + APK
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.rel.outputs.tag }}
           files: librus-client.apk
           generate_release_notes: true
         env:

@@ -100,20 +100,21 @@ For local setup and testing, see [`SETUP.md`](./SETUP.md) and [`TESTING_GUIDE.md
 
 ### Stable download (`latest` release)
 
-After at least one **tagged release** (see below), the newest **debug** APK is always at:
+Published APKs live under **[Releases](https://github.com/talareq/librus-client/releases)**.  
+After at least one **GitHub Release** exists, a stable direct link to the newest asset is:
 
 **[https://github.com/talareq/librus-client/releases/latest/download/librus-client.apk](https://github.com/talareq/librus-client/releases/latest/download/librus-client.apk)**
 
-(If this returns 404, no release has been published yet.) All builds are **debug** APKs for local testing, not Play Store listings.
+If that URL returns **404**, the repo has **no releases yet** (the workflow has not produced a release, or it failed). Until then, use [CI artifacts](#ci-artifacts-every-push-to-main) below. All APKs here are **debug** builds for local testing, not Play Store listings.
 
-**Cut a release:** align `package.json` `version` with the tag (e.g. `0.2.0` → tag `v0.2.0`), commit to `main`, then:
+**Cut the first (or next) release**
 
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+1. Ensure `package.json` `version` matches what you want to ship (e.g. `0.1.0` on `main`).
+2. Either  
+   - **GitHub Actions:** open **[Release debug APK](https://github.com/talareq/librus-client/actions/workflows/release-apk.yml)** → **Run workflow** → enter the same semver **without** `v` (e.g. `0.1.0`), run on `main`, **or**
+   - **Git:** `git tag v0.1.0 && git push origin v0.1.0` (tag must match `package.json`).
 
-The [`release-apk`](.github/workflows/release-apk.yml) workflow builds the app and attaches **`librus-client.apk`** to that GitHub Release. Publishing the release also triggers the post-release version bump on `main` (see [`.github/workflows/bump-version-after-release.yml`](.github/workflows/bump-version-after-release.yml)).
+The [`release-apk`](.github/workflows/release-apk.yml) workflow builds the app and attaches **`librus-client.apk`**. Publishing a release also triggers the post-release version bump on `main` (see [`.github/workflows/bump-version-after-release.yml`](.github/workflows/bump-version-after-release.yml)).
 
 ### CI artifacts (every push to `main`)
 
