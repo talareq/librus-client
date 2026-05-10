@@ -1,10 +1,11 @@
 # Łańcuch (opcjonalny): po udanym „Build Android APK” na domyślnej gałęzi, jeśli commit
-# zawiera [publish-apk], uruchamia „Release debug APK” dla wersji z package.json z tego SHA.
+# lub powiązany PR zawiera [publish-apk] w treści commita / tytule lub opisie PR,
+# uruchamia „Release debug APK” dla wersji z package.json z tego SHA.
 # Następnie: opublikowanie release → bump-version-after-release (package.json + iOS).
 #
-# Użycie: w treści commita (np. merge na main) dodaj [publish-apk]; version w package.json
-# musi być tym, który chcesz wydać (np. 0.1.0). Nie dodawaj znacznika przy każdym merge —
-# tylko gdy celowo wydajesz APK pod /releases/latest/download/…
+# Użycie: [publish-apk] w treści merge/squasha albo w PR (tytuł lub opis);
+# version w package.json musi być tym, który chcesz wydać. Nie dodawaj znacznika
+# przy każdym merge — tylko gdy celowo wydajesz APK pod /releases/latest/download/…
 
 name: Chain release after APK CI
 
@@ -16,6 +17,7 @@ on:
 permissions:
   contents: read
   actions: write
+  pull-requests: read
 
 jobs:
   dispatch-release:
@@ -37,9 +39,37 @@ jobs:
               owner, repo, ref: sha,
             });
             const message = commit.commit.message || "";
-            if (!message.includes("[publish-apk]")) {
+
+            let publish = message.includes("[publish-apk]");
+            if (!publish) {
+              try {
+                const { data: prs } =
+                  await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                    owner,
+                    repo,
+                    commit_sha: sha,
+                  });
+                for (const pr of prs) {
+                  const blob = `${pr.title || ""}\n${pr.body || ""}`;
+                  if (blob.includes("[publish-apk]")) {
+                    publish = true;
+                    core.notice(
+                      `Znaleziono [publish-apk] w PR #${pr.number} (tytuł/opis) — kontynuuję release.`
+                    );
+                    break;
+                  }
+                }
+              } catch (e) {
+                core.warning(
+                  `Nie udało się sprawdzić PR powiązanych z commitem (uprawnienia/API): ${e}`
+                );
+              }
+            }
+
+            if (!publish) {
               core.notice(
-                "Pominięto: brak znacznika [publish-apk] w treści commita — nie uruchamiam release."
+                "Pominięto release: dodaj [publish-apk] w wiadomości commita merge/squasha " +
+                  "albo w tytule/opisie powiązanego PR. Alternatywa: Actions → „Release debug APK” → Run workflow."
               );
               return;
             }
