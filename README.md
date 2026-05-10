@@ -19,11 +19,11 @@ This application lets a signed-in user sync and browse **grades** (with Polish s
 
 ## Demo
 
-<!-- Replace with your hosted GIF (e.g. GitHub raw, Loom, or personal CDN) -->
+The animation below walks through a condensed flow: **grades with an active session**, **embedded-browser login**, **the sync screen**, and **messages, notes, announcements, and timetable**. Frames that contained sensitive data (e.g. teachers or identifiers in lists) were **redacted** before the GIF was committed to the repository.
 
-![App Demo](link-to-gif)
+![App demo — grades, login, sync, tabs](docs/readme-assets/librus-client-demo.gif)
 
-*Screen recording placeholder—drop a GIF here to show sync, navigation, and offline read after sync.*
+*Built from device screenshots. Regenerate with `python3 tools/readme-demo/build-readme-demo-gif.py` (**Pillow**, **pytesseract**, system **Tesseract** with Polish trained data, e.g. `brew install tesseract tesseract-lang`). Messages and notes screens redact a fixed list of name phrases from `README_DEMO_PII_PHRASES` in the script (OCR → pixelate). `--blur` affects announcement bands only; crossfades are on by default (`--transition-steps 0` for hard cuts).*
 
 ---
 
