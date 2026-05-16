@@ -48,6 +48,57 @@ ion-content {
   --background: #f8f9fa;
 }
 
+.minimize-hint-card {
+  margin: 16px 16px 0;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(102, 126, 234, 0.18);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.06) 100%);
+
+  ion-card-content {
+    padding: 14px 16px 12px;
+  }
+
+  .minimize-hint-body {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+
+  .minimize-hint-icon {
+    flex-shrink: 0;
+    font-size: 1.75rem;
+    color: var(--ion-color-primary);
+    margin-top: 2px;
+  }
+
+  .minimize-hint-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .minimize-hint-title {
+    margin: 0 0 6px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--ion-color-dark);
+  }
+
+  .minimize-hint-desc {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--ion-color-medium-shade);
+  }
+
+  .minimize-hint-dismiss {
+    margin: 0;
+    --border-radius: 10px;
+    font-weight: 600;
+  }
+}
+
 .status-card {
   margin: 16px;
   border-radius: 16px;

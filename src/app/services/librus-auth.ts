@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Subscription } from 'rxjs';
+import { Subscription, filter, firstValueFrom, take, timeout } from 'rxjs';
 import { InAppBrowser, InAppBrowserObject, InAppBrowserEvent } from '@awesome-cordova-plugins/in-app-browser/ngx';
 import { Capacitor, CapacitorCookies, CapacitorHttp } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
@@ -9,6 +9,7 @@ import { WiadomosciMessagesApiService } from './wiadomosci-messages-api.service'
 import { SyncResult, SyncProgress, SyncAllOptions, Message } from '../models/librus-data.models';
 import { environment } from '../../environments/environment';
 import { devInfo, devLog, devWarn } from '../utils/dev-log';
+import { notifyLocalSyncCompletedForTest } from '../utils/sync-local-notification';
 
 interface CookieData {
   url: string;
@@ -35,6 +36,8 @@ export class LibrusAuthService {
   private scrapeLoadStopSub: Subscription | null = null;
   /** Stare callbacki async po przejściu do kolejnej sekcji synchronizacji — ignorujemy. */
   private scrapeGeneration = 0;
+  /** Pełny sync (`syncAllData`) — blokada równoległych wywołań (np. UI + zdalny FCM). */
+  private syncAllDataInFlight = false;
   /** Cordova może wyemitować wiele loadstop na jednym fragmencie SPA — jedna sesja DOM scrapingu naraz. */
   private domScrapeRunning = false;
   /** Jednorazowo na cały `syncAllData`: schowanie IAB + sygnał dla UI, gdy zaczyna się pierwszy odczyt DOM po logowaniu. */
@@ -143,13 +146,41 @@ export class LibrusAuthService {
   /** Czas ważności markera w Preferencjach (nie równa się TTL cookies HttpOnly w WebView). */
   private readonly SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 dni
   private readonly LIBR_SYNERGIA_COOKIE_URL = 'https://synergia.librus.pl';
+  /** Dashboard rodzica (GET testowy po Sync — `runDeferredHttpPingAfterSync`). */
+  private readonly LIBR_SYNERGIA_RODZIC_DASHBOARD_URL =
+    'https://synergia.librus.pl/rodzic/index';
   private readonly LIBR_WIADOMOSCI_COOKIE_URL = 'https://wiadomosci.librus.pl';
+  /**
+   * Kolejność jak w Chrome (Application → Cookies → synergia) przy żądaniu do rodzic/index.
+   */
+  private readonly rodzicCookieHeaderKeyOrder = [
+    'TestCookie',
+    'access_denied_login_url',
+    'cookiesession1',
+    'SDZIENNIKSID',
+    'DZIENNIKSID',
+    'oauth_token',
+  ] as const;
+  /** Domyślna wartość `access_denied_login_url` gdy brak w słoiku (jak typowy link logowania). */
+  private readonly rodzicDefaultAccessDeniedLoginUrl =
+    'https%3A%2F%2Fsynergia.librus.pl%2Floguj';
   /** Domeny do zapisu / diagnozy — ten sam zestaw co w `saveCookies`. */
   private readonly capacitorJarOrigins = [
     'https://synergia.librus.pl',
     'https://wiadomosci.librus.pl',
     'https://portal.librus.pl',
     'https://api.librus.pl'
+  ] as const;
+
+  /**
+   * Kolejność łączenia słoików przy nagłówku dla rodzic/index — **synergia na końcu**,
+   * żeby `DZIENNIKSID` / `cookiesession1` z Synergii nie były nadpisywane inną domeną.
+   */
+  private readonly rodzicCookieJarMergeOrder = [
+    'https://api.librus.pl',
+    'https://portal.librus.pl',
+    'https://wiadomosci.librus.pl',
+    'https://synergia.librus.pl',
   ] as const;
 
   /**
@@ -1447,6 +1478,72 @@ export class LibrusAuthService {
       .join('; ');
   }
 
+  /** Parsuje `document.cookie` (tylko ciastka nie-HttpOnly) — pierwsze `=` dzieli klucz/wartość. */
+  private parseBrowserCookieString(cookieString: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const part of cookieString.split(';')) {
+      const eq = part.indexOf('=');
+      if (eq <= 0) {
+        continue;
+      }
+      const key = part.slice(0, eq).trim();
+      const value = part.slice(eq + 1).trim();
+      if (key) {
+        out[key] = value;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Scala słoiki Capacitor (wszystkie `capacitorJarOrigins`). Wartości niepuste nadpisują wcześniejsze klucze.
+   */
+  private async mergeCapacitorJarsForRodzic(): Promise<Record<string, string>> {
+    const merged: Record<string, string> = {};
+    if (!Capacitor.isNativePlatform()) {
+      return merged;
+    }
+    for (const origin of this.rodzicCookieJarMergeOrder) {
+      try {
+        const jar = await CapacitorCookies.getCookies({ url: origin });
+        for (const [k, v] of Object.entries(jar || {})) {
+          if (v != null && String(v) !== '') {
+            merged[k] = String(v);
+          }
+        }
+      } catch {
+        /* noop */
+      }
+    }
+    return merged;
+  }
+
+  /**
+   * Buduje nagłówek Cookie dla GET `…/rodzic/index`: kolejność jak w przeglądarce, kanoniczny `DZIENNIKSID`
+   * (jak `dziennikSidForWiadomosciFromSynergiaJar`), domyślne `TestCookie=1` i `access_denied_login_url` gdy brak.
+   */
+  private buildRodzicCapacitorHttpCookieHeader(jarMerged: Record<string, string>): string {
+    const m: Record<string, string> = { ...jarMerged };
+    const canonicalDz = this.dziennikSidForWiadomosciFromSynergiaJar(m);
+    if (canonicalDz) {
+      m['DZIENNIKSID'] = canonicalDz;
+    }
+    if (!m['TestCookie']?.trim()) {
+      m['TestCookie'] = '1';
+    }
+    if (!m['access_denied_login_url']?.trim()) {
+      m['access_denied_login_url'] = this.rodzicDefaultAccessDeniedLoginUrl;
+    }
+    const parts: string[] = [];
+    for (const key of this.rodzicCookieHeaderKeyOrder) {
+      const v = m[key];
+      if (v != null && String(v).length > 0) {
+        parts.push(`${key}=${String(v)}`);
+      }
+    }
+    return parts.join('; ');
+  }
+
   /**
    * Skrzynka czyta inny host niż Synergia. CapacitorHttp widzi osobny słoik —
    * kopiujemy pełne DZIENNIKSID ze słoika / skanując wartości z sufiksem jak SDZIENNIKSID —
@@ -1725,6 +1822,20 @@ export class LibrusAuthService {
 
   // Główna metoda synchronizacji wszystkich danych
   async syncAllData(options?: SyncAllOptions): Promise<SyncResult> {
+    if (this.syncAllDataInFlight) {
+      devLog('⏳ syncAllData już trwa — pomijam równoległe wywołanie.');
+      return {
+        success: false,
+        newGrades: 0,
+        newMessages: 0,
+        newNotes: 0,
+        newAnnouncements: 0,
+        newEvents: 0,
+        error: 'Synchronizacja już trwa.',
+      };
+    }
+    this.syncAllDataInFlight = true;
+
     devLog('🔄 Rozpoczynam pełną synchronizację danych...');
 
     this.domScrapeUiGateDoneForSync = false;
@@ -1911,14 +2022,25 @@ export class LibrusAuthService {
       result.success = true;
       devLog('🎉 Synchronizacja zakończona sukcesem!');
 
-      emit('Kończenie — zamykanie przeglądarki…', 92);
-
       await this.markSessionActive();
+
+      if (environment.simulateDeferredHttpAfterSync) {
+        emit('[HTTP-AFTER-SYNC] Test HTTP — czekam 5 s (IAB otwarte, sesja w WebView)…', 93);
+        console.log(
+          '[HTTP-AFTER-SYNC] waiting 5s — InAppBrowser stays OPEN (session cookies are in IAB WebView, not Capacitor jar)…'
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await this.runDeferredHttpPingAfterSync();
+      }
+
+      emit('Kończenie — zamykanie przeglądarki…', 92);
 
       this.closeInAppBrowserAfterSync('sukces synchronizacji');
 
       emit('Synchronizacja zakończona.', 100);
-      
+
+      void notifyLocalSyncCompletedForTest();
+
       return result;
 
     } catch (error) {
@@ -1937,10 +2059,9 @@ export class LibrusAuthService {
       return result;
     } finally {
       this.pendingDomScrapeBeginCallback = undefined;
+      this.syncAllDataInFlight = false;
     }
   }
-
-  // Pomocnicza metoda do scrapingu konkretnej sekcji
   private async scrapeSection(
     url: string,
     script: string,
@@ -2752,6 +2873,222 @@ export class LibrusAuthService {
       });
 
     });
+  }
+
+  /**
+   * Test po Sync: otwiera dashboard rodzica **w IAB** (sesja + HttpOnly są w tym WebView;
+   * `CapacitorCookies` dla synergia jest zwykle puste po samym scrapowaniu z wiadomości).
+   * Nawigacja `rodzic/index` → `loadstop` → odczyt treści strony. Wywołuj przed `closeInAppBrowserAfterSync`.
+   */
+  private async runDeferredHttpPingAfterSync(): Promise<void> {
+    const tag = '[HTTP-AFTER-SYNC]';
+    const targetUrl = this.LIBR_SYNERGIA_RODZIC_DASHBOARD_URL;
+    const targetEsc = this.escapeJsSingleQuoted(targetUrl);
+
+    if (this.browser) {
+      try {
+        console.log(tag, 'IAB navigate →', targetUrl);
+        const loadDone = firstValueFrom(
+          this.browser.on('loadstop').pipe(
+            filter((e: InAppBrowserEvent) => {
+              const u = (e.url || '').toLowerCase();
+              return u.includes('synergia.librus.pl') && u.includes('rodzic');
+            }),
+            take(1),
+            timeout({ first: 25_000 })
+          )
+        );
+        await this.browser.executeScript({
+          code: `window.location.href = '${targetEsc}';`,
+        });
+
+        const ev = await loadDone;
+        console.log(tag, 'loadstop URL:', ev.url);
+
+        const docCookieCode = `(function(){ try { return document.cookie || ''; } catch (e) { return ''; } })();`;
+        const docRaw = await this.browser.executeScript({ code: docCookieCode });
+        const docStr = docRaw?.[0] != null ? String(docRaw[0]) : '';
+        const fromDoc = this.parseBrowserCookieString(docStr);
+
+        let merged = await this.mergeCapacitorJarsForRodzic();
+        for (const [k, v] of Object.entries(fromDoc)) {
+          if (merged[k] == null || merged[k] === '') {
+            merged[k] = v;
+          }
+        }
+
+        const cookieHeader = this.buildRodzicCapacitorHttpCookieHeader(merged);
+        const presentKeys = this.rodzicCookieHeaderKeyOrder.filter(
+          (k) => merged[k] != null && String(merged[k]).length > 0
+        );
+        console.log(
+          tag,
+          'Cookie header length:',
+          cookieHeader.length,
+          '| keys present (unordered scan):',
+          presentKeys.join(', ')
+        );
+        console.log(tag, 'Cookie header:', cookieHeader);
+
+        if (
+          !cookieHeader.includes('cookiesession1=') ||
+          !cookieHeader.includes('DZIENNIKSID=')
+        ) {
+          console.log(
+            tag,
+            'warning: missing cookiesession1 and/or DZIENNIKSID — CapacitorHttp GET may return login page.'
+          );
+        }
+
+        try {
+          const httpRes = await CapacitorHttp.get({
+            url: targetUrl,
+            headers: {
+              Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+              Cookie: cookieHeader,
+            },
+          });
+          console.log(tag, 'CapacitorHttp GET status:', httpRes.status);
+          const hd = httpRes.data;
+          const httpPreview =
+            typeof hd === 'string'
+              ? hd.slice(0, 2500)
+              : hd != null
+                ? JSON.stringify(hd).slice(0, 2500)
+                : '(empty)';
+          console.log(
+            tag,
+            'CapacitorHttp response HTML preview (first ~2500 chars — this IS raw server HTML):',
+            httpPreview
+          );
+        } catch (httpErr) {
+          console.log(tag, 'CapacitorHttp GET error:', String(httpErr));
+        }
+
+        const readCode = `(function(){
+          try {
+            var html = '';
+            var htmlFrom = '';
+            try {
+              var banner = document.getElementById('top-banner-container');
+              if (banner) {
+                html = String(banner.outerHTML || '');
+                htmlFrom = 'top-banner-container';
+              } else {
+                html = (document.body && document.body.innerHTML) ? String(document.body.innerHTML) : '';
+                htmlFrom = 'body-innerHTML-fallback';
+              }
+            } catch (_) {}
+            return JSON.stringify({
+              via: 'IAB-DOM-after-rodzic-nav',
+              href: String(location.href || ''),
+              title: String(document.title || ''),
+              snip: String((document.body && document.body.innerText) ? document.body.innerText : '').slice(0, 900),
+              htmlSnipFrom: htmlFrom,
+              htmlSnip: html.slice(0, 12000)
+            });
+          } catch (e) {
+            return JSON.stringify({ via: 'IAB-DOM', err: String(e && e.message != null ? e.message : e) });
+          }
+        })();`;
+
+        const raw = await this.browser.executeScript({ code: readCode });
+        const txt =
+          raw != null && raw[0] != null && raw[0] !== ''
+            ? String(raw[0])
+            : '(empty executeScript result)';
+        console.log(tag, 'page snapshot (raw):', txt);
+        try {
+          const parsed = JSON.parse(txt) as {
+            href?: string;
+            title?: string;
+            snip?: string;
+            htmlSnip?: string;
+            htmlSnipFrom?: string;
+            err?: string;
+          };
+          if (parsed.err) {
+            console.log(tag, 'DOM read error:', parsed.err);
+          } else {
+            console.log(tag, 'final href:', parsed.href);
+            console.log(tag, 'document.title:', parsed.title);
+            if (parsed.htmlSnipFrom) {
+              console.log(tag, 'HTML snippet source:', parsed.htmlSnipFrom);
+            }
+            if (parsed.snip) {
+              console.log(
+                tag,
+                'body innerText preview (no HTML tags):',
+                parsed.snip
+              );
+            }
+            if (parsed.htmlSnip) {
+              console.log(
+                tag,
+                'HTML snippet (#top-banner-container outerHTML when present, else body):',
+                parsed.htmlSnip
+              );
+            }
+          }
+        } catch {
+          console.log(tag, 'could not JSON.parse snapshot');
+        }
+      } catch (e) {
+        console.log(tag, 'nav / loadstop / snapshot failed:', String(e));
+      }
+      return;
+    }
+
+    console.log(
+      tag,
+      'no InAppBrowser handle — trying CapacitorHttp + CapacitorCookies (may be empty)…'
+    );
+
+    try {
+      if (!Capacitor.isNativePlatform()) {
+        console.log(
+          tag,
+          'Skipped: not native — no IAB and no Capacitor cookie jar for this test.'
+        );
+        return;
+      }
+      const merged = await this.mergeCapacitorJarsForRodzic();
+      const cookieHeader = this.buildRodzicCapacitorHttpCookieHeader(merged).trim();
+      if (!cookieHeader) {
+        console.log(
+          tag,
+          'Empty Cookie header after merge — IAB was already closed; no session in native jars.'
+        );
+        return;
+      }
+      console.log(tag, 'Cookie header:', cookieHeader);
+      console.log(tag, 'GET', targetUrl, '| Cookie header length:', cookieHeader.length);
+      const res = await CapacitorHttp.get({
+        url: targetUrl,
+        headers: {
+          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+          Cookie: cookieHeader,
+        },
+      });
+      console.log(tag, 'response.status', res.status);
+      console.log(
+        tag,
+        'response.headers',
+        typeof res.headers === 'object'
+          ? JSON.stringify(res.headers)
+          : res.headers
+      );
+      const body = res.data;
+      const preview =
+        typeof body === 'string'
+          ? body.slice(0, 900)
+          : body != null
+            ? JSON.stringify(body).slice(0, 900)
+            : '(empty)';
+      console.log(tag, 'response.data preview:', preview);
+    } catch (e) {
+      console.log(tag, 'CapacitorHttp error', e);
+    }
   }
 
   // Zamiast próbować kopiować HttpOnly cookies, po prostu zapisujemy marker że sesja jest aktywna

@@ -55,6 +55,24 @@
 </ion-modal>
 
 <ion-content [fullscreen]="true">
+
+  <ion-card *ngIf="showMinimizeHint" class="minimize-hint-card">
+    <ion-card-content>
+      <div class="minimize-hint-body">
+        <ion-icon name="phone-portrait-outline" class="minimize-hint-icon" aria-hidden="true"></ion-icon>
+        <div class="minimize-hint-text">
+          <p class="minimize-hint-title">Zostaw aplikację w tle</p>
+          <p class="minimize-hint-desc">
+            Nie zamykaj jej z listy ostatnich aplikacji (nie przesuwaj w górę, żeby „wyrzucić”).
+            Wróć na ekran główny przyciskiem <strong>Home</strong> i zostaw proces w tle — wtedy możliwe będzie odświeżanie danych bez ciągłego otwierania aplikacji.
+          </p>
+        </div>
+      </div>
+      <ion-button expand="block" fill="solid" color="primary" size="small" class="minimize-hint-dismiss" (click)="dismissMinimizeHint()">
+        Rozumiem
+      </ion-button>
+    </ion-card-content>
+  </ion-card>
   
   <!-- Status message -->
   <ion-card *ngIf="wynik" class="status-card">

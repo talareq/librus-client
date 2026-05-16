@@ -9,6 +9,19 @@
  */
 export const environment = {
   production: true,
+  /** Jak w dev — opóźniony test HTTP po Sync (logcat / Safari Web Inspector). */
+  simulateDeferredHttpAfterSync: true,
+  localNotifyOnSyncSuccess: true,
+  scheduledOpenAppReminder: {
+    enabled: true,
+    hour: 8,
+    minute: 0,
+  },
+  remotePushWake: {
+    enabled: false,
+    apiBaseUrl: '',
+    apiBearerToken: '',
+  },
   demoRecordingPrivacy: true,
   versionCheck: {
     enabled: true,

@@ -10,7 +10,10 @@ const config: CapacitorConfig = {
     },
     CapacitorCookies: {
       enabled: true, // TO JEST KLUCZ: Android zapamięta teraz sesję
-    }
+    },
+    PushNotifications: {
+      presentationOptions: ['sound', 'alert'],
+    },
   },
 };
 

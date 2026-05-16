@@ -6,6 +6,35 @@
 export const environment = {
   production: false,
   /**
+   * Po udanym Sync: za 5 s testowy GET (CapacitorHttp + Cookie z jar) na dashboard Synergii — log w konsoli.
+   * To nie jest prawdziwy „background OS”; wyłączone w production (`environment.prod.ts`).
+   */
+  simulateDeferredHttpAfterSync: true,
+  /**
+   * Po udanym Sync: lokalna notyfikacja „Synchronizacja zakończona” (test, bez serwera).
+   * Wyłącz w production przed wydaniem, jeśli ma nie przeszkadzać użytkownikom.
+   */
+  localNotifyOnSyncSuccess: true,
+  /**
+   * Codzienne lokalne przypomnienie (bez serwera): otwórz apkę i zrób sync.
+   * Wymaga uprawnień do powiadomień; harmonogram ustawia się przy starcie aplikacji.
+   */
+  scheduledOpenAppReminder: {
+    enabled: true,
+    hour: 8,
+    minute: 0,
+  },
+  /**
+   * Zdalny „budzik” FCM: mały backend w `backend/` zapisuje token i wywołuje `/v1/wake`.
+   * Backend nie widzi ciasteczek Librus. Wymaga Firebase (`google-services.json` na Androidzie).
+   */
+  remotePushWake: {
+    enabled: false,
+    apiBaseUrl: '',
+    /** Ten sam sekret co `API_SECRET` na serwerze (Authorization: Bearer …). */
+    apiBearerToken: '',
+  },
+  /**
    * Tymczasowo na nagranie demo: rozmycie pól logowania w InAppBrowser + redakcja nazw/tekstów w UI.
    * Po nagraniu ustaw `false` i przebuduj aplikację.
    */

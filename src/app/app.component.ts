@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { ensureScheduledOpenAppReminder } from './utils/sync-local-notification';
 import { AppRemoteVersionService } from './services/app-remote-version.service';
 
 @Component({
@@ -12,5 +13,6 @@ export class AppComponent implements OnInit {
 
   ngOnInit(): void {
     void this.remoteVersion.checkOnStartup();
+    void ensureScheduledOpenAppReminder();
   }
 }

@@ -1,0 +1,76 @@
+# Wykonuje zapytanie HTTP do wybranego adresu (np. webhook backendu, health check).
+# Uruchomienie: Actions → „HTTP ping” → Run workflow.
+#
+# Konfiguracja:
+#   Repository → Settings → Secrets and variables → Actions → New repository secret
+#   - PING_URL   → pełny URL (np. https://api.example.com/v1/cron/check lub health)
+# Opcjonalnie:
+#   - PING_METHOD → domyślnie GET; ustaw POST dla zapisów
+#   - PING_HEADERS → jedna linia nagłówków dla curl, np. Authorization: Bearer x\nX-App: librus
+#
+# Uwaga: To nie „budzi” aplikacji na telefonie — tylko wywołuje serwer w internecie.
+# Aby dotrzeć do urządzenia, backend musi np. wysłać FCM po takim wywołaniu.
+
+name: HTTP ping
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Opcjonalny URL (pusty = użyj sekretu PING_URL)"
+        required: false
+        default: ""
+      method:
+        description: "HTTP method"
+        type: choice
+        options:
+          - GET
+          - HEAD
+          - POST
+        default: GET
+  # Odkomentuj, żeby cyklicznie pinguć (harmonogram w UTC):
+  # schedule:
+  #   - cron: "0 */6 * * *" # co 6 godzin
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve URL
+        id: target
+        run: |
+          MANUAL="${{ github.event.inputs.url }}"
+          SECRET_URL="${{ secrets.PING_URL }}"
+          if [ -n "$MANUAL" ]; then
+            echo "url=$MANUAL" >> "$GITHUB_OUTPUT"
+          elif [ -n "$SECRET_URL" ]; then
+            echo "url=$SECRET_URL" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Ustaw sekret PING_URL albo podaj URL przy ręcznym uruchomieniu."
+            exit 1
+          fi
+
+      - name: HTTP request
+        env:
+          METHOD: ${{ github.event.inputs.method || 'GET' }}
+          PING_HEADERS: ${{ secrets.PING_HEADERS }}
+        run: |
+          set -euo pipefail
+          URL="${{ steps.target.outputs.url }}"
+          EXTRA=()
+          if [ -n "${PING_HEADERS:-}" ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              EXTRA+=(-H "$line")
+            done <<< "$PING_HEADERS"
+          fi
+          echo "Request: $METHOD $URL"
+          curl -fsS --max-time 60 -X "$METHOD" "${EXTRA[@]}" \
+            -D - -o /tmp/ping-body \
+            "$URL"
+          echo "--- body (first 2KB) ---"
+          head -c 2048 /tmp/ping-body || true
+          echo ""

@@ -1,9 +1,13 @@
-import { Component, OnInit, NgZone } from '@angular/core';
+import { Component, OnDestroy, OnInit, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IonicModule } from '@ionic/angular';
+import { App } from '@capacitor/app';
+import type { PluginListenerHandle } from '@capacitor/core';
+import { Subscription } from 'rxjs';
 import { LibrusAuthService } from '../services/librus-auth';
 import { LibrusStorageService } from '../services/librus-storage.service';
+import { LocalNotificationTapService } from '../services/local-notification-tap.service';
 import { GradesBySubject, Message, Note, Announcement, CalendarEvent, Grade, SyncProgress } from '../models/librus-data.models';
 import { buildGradesSemesterSections, type GradesSemesterSection } from '../utils/grade-semester';
 import { demoRedactLine, demoRedactMultiline } from '../utils/demo-privacy';
@@ -16,7 +20,13 @@ import { devLog } from '../utils/dev-log';
   standalone: true,
   imports: [IonicModule, CommonModule, FormsModule]
 })
-export class HomePage implements OnInit {
+export class HomePage implements OnInit, OnDestroy {
+  /** Przy każdym uruchomieniu / wznowieniu aplikacji; „Rozumiem” chowa do następnego wejścia w appkę. */
+  showMinimizeHint = true;
+
+  private appStateListener: PluginListenerHandle | null = null;
+  private reminderSyncFromNotifySub: Subscription | null = null;
+
   isLoading = false;
   /** Pełnoekranowy preloader z paskiem postępu tylko podczas Sync (nie przy wylogowaniu). */
   syncOverlayVisible = false;
@@ -69,12 +79,37 @@ export class HomePage implements OnInit {
   constructor(
     private authService: LibrusAuthService,
     private storageService: LibrusStorageService,
-    private ngZone: NgZone
+    private ngZone: NgZone,
+    private localNotificationTap: LocalNotificationTapService
   ) {}
 
   async ngOnInit() {
+    this.showMinimizeHint = true;
+    this.appStateListener = await App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) {
+        this.ngZone.run(() => {
+          this.showMinimizeHint = true;
+        });
+      }
+    });
+    this.reminderSyncFromNotifySub = this.localNotificationTap.afterReminderOpenRequestSync$.subscribe(
+      () => {
+        void this.runSyncIfSessionAfterReminderFromNotification();
+      }
+    );
     await this.loadData();
     await this.checkSession();
+  }
+
+  ngOnDestroy(): void {
+    void this.appStateListener?.remove();
+    this.appStateListener = null;
+    this.reminderSyncFromNotifySub?.unsubscribe();
+    this.reminderSyncFromNotifySub = null;
+  }
+
+  dismissMinimizeHint(): void {
+    this.showMinimizeHint = false;
   }
 
   async loadData() {
@@ -99,6 +134,16 @@ export class HomePage implements OnInit {
       this.wynik = 'Brak aktywnej sesji. Po kliknięciu zostaniesz poproszony o zalogowanie.';
       devLog('❌ HomePage: Brak sesji');
     }
+  }
+
+  /** Po tapnięciu codziennej notyfikacji (extra.startSync): wejdź na Home i spróbuj sync tylko przy aktywnej sesji. */
+  private async runSyncIfSessionAfterReminderFromNotification(): Promise<void> {
+    await this.ngZone.run(async () => {
+      await this.checkSession();
+      if (this.hasSession && !this.isLoading) {
+        await this.syncAll();
+      }
+    });
   }
 
   async syncAll() {
