@@ -78,6 +78,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+src/environments/environment.prod.secrets.local.ts
 
 # --- Capacitor / native tooling ---
 .capacitor/

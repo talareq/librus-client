@@ -20,7 +20,7 @@ export const environment = {
   remotePushWake: {
     enabled: false,
     apiBaseUrl: '',
-    apiBearerToken: '',
+    apiBearerToken: '523c0d461804d4ac5295e9d69d56b54d170fc5ff62dc5d556a4374d7f527fc42',
   },
   /**
    * Na nagranie używaj osobnego buildu: `npm run build:demo` (`environment.demo.ts`).
