@@ -1,3 +1,5 @@
+import { prodWakePublicBaseUrl } from './environment.prod.wake';
+
 export const environment = {
   production: true,
   /**
@@ -16,12 +18,18 @@ export const environment = {
     hour: 8,
     minute: 0,
   },
-  /** FCM wake — ustaw URL + token po wdrożeniu `backend/`; domyślnie wyłączone. */
-  remotePushWake: {
-    enabled: false,
-    apiBaseUrl: '',
-    apiBearerToken: '523c0d461804d4ac5295e9d69d56b54d170fc5ff62dc5d556a4374d7f527fc42',
-  },
+  /**
+   * FCM: wake + powiadomienie o nowej wersji. Włącza się, gdy w `environment.prod.wake.ts`
+   * jest niepusty `prodWakePublicBaseUrl` (w `ng build` produkcyjnym nadal wyłączone, dopóki URL pusty).
+   */
+  remotePushWake: (() => {
+    const apiBaseUrl = prodWakePublicBaseUrl.trim().replace(/\/$/, '');
+    return {
+      enabled: apiBaseUrl.length > 0,
+      apiBaseUrl,
+      apiBearerToken: '523c0d461804d4ac5295e9d69d56b54d170fc5ff62dc5d556a4374d7f527fc42',
+    };
+  })(),
   /**
    * Na nagranie używaj osobnego buildu: `npm run build:demo` (`environment.demo.ts`).
    * Tu zostaw `false`, żeby zwykły release APK nie miał trybu „demo”.

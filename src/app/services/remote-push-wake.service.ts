@@ -21,6 +21,8 @@ export const REMOTE_PUSH_NEW_VERSION_ACTION = 'librus_new_version';
 @Injectable({ providedIn: 'root' })
 export class RemotePushWakeService {
   private initialized = false;
+  /** Zapobiega wielokrotnemu `addListener` przy ponownym `initialize()`. */
+  private listenersAttached = false;
   private handles: PluginListenerHandle[] = [];
 
   constructor(
@@ -46,9 +48,11 @@ export class RemotePushWakeService {
     if (this.initialized) {
       return;
     }
-    this.initialized = true;
 
-    await this.attachListeners(base, bearer);
+    if (!this.listenersAttached) {
+      await this.attachListeners(base, bearer);
+      this.listenersAttached = true;
+    }
 
     const perm = await PushNotifications.requestPermissions();
     if (perm.receive !== 'granted') {
@@ -60,7 +64,10 @@ export class RemotePushWakeService {
       await PushNotifications.register();
     } catch (e) {
       console.warn('[RemotePushWake] register() nie powiodło się — sprawdź Firebase (google-services.json / iOS).', e);
+      return;
     }
+
+    this.initialized = true;
   }
 
   private async attachListeners(apiBase: string, bearer: string): Promise<void> {
