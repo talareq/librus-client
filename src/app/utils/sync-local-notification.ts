@@ -1,11 +1,13 @@
 import { Capacitor } from '@capacitor/core';
-import { LocalNotifications } from '@capacitor/local-notifications';
+import { LocalNotifications, type LocalNotificationSchema } from '@capacitor/local-notifications';
 import { environment } from '../../environments/environment';
 
 const SYNC_CHANNEL_ID = 'librus_sync';
 const REMINDER_CHANNEL_ID = 'librus_reminder';
+const APP_UPDATES_CHANNEL_ID = 'librus_app_updates';
 /** Stałe ID — anuluj przed ponownym `schedule`, żeby nie duplikować. */
 export const OPEN_APP_SYNC_REMINDER_NOTIFICATION_ID = 92_001;
+const NEW_RELEASE_LOCAL_NOTIFICATION_ID = 92_003;
 
 /**
  * `extra.kind` musi się zgadzać z obsługą w `LocalNotificationTapService`
@@ -13,11 +15,23 @@ export const OPEN_APP_SYNC_REMINDER_NOTIFICATION_ID = 92_001;
  */
 export const LOCAL_NOTIFY_EXTRA_KIND = 'librus_client_open_home' as const;
 
+/** Tap → otwórz URL (np. strona release z APK) w przeglądarce systemowej. */
+export const LOCAL_NOTIFY_RELEASE_EXTRA_KIND = 'librus_client_open_release' as const;
+
 export type LibrusLocalNotificationExtraPayload = {
   kind: typeof LOCAL_NOTIFY_EXTRA_KIND;
   /** Po tapnięciu: po wejściu na Home uruchom sync (tylko przy sesji). */
   startSync?: boolean;
 };
+
+export type LibrusLocalNotificationReleaseExtraPayload = {
+  kind: typeof LOCAL_NOTIFY_RELEASE_EXTRA_KIND;
+  openUrl: string;
+};
+
+export type LibrusLocalNotificationAnyExtra =
+  | LibrusLocalNotificationExtraPayload
+  | LibrusLocalNotificationReleaseExtraPayload;
 
 /**
  * Wyciąga liczby z `<span class="circle">…</span>` w HTML `#top-banner-container` / `#graphic-menu`.
@@ -35,6 +49,58 @@ export function extractCircleBadgeCountsFromGraphicMenuHtml(html: string): numbe
     }
   }
   return out;
+}
+
+/**
+ * Lokalna notyfikacja po FCM `librus_new_version` (link z GitHub Release).
+ * Nie wymaga sesji Librus — tylko zgody na powiadomienia.
+ */
+export async function notifyNewReleaseFromFcm(tag: string, releaseUrl: string): Promise<void> {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+  const t = tag.trim() || 'nowa wersja';
+  const url = releaseUrl.trim();
+  if (!url) {
+    return;
+  }
+  try {
+    const perm = await LocalNotifications.requestPermissions();
+    if (perm.display !== 'granted') {
+      return;
+    }
+    if (Capacitor.getPlatform() === 'android') {
+      await LocalNotifications.createChannel({
+        id: APP_UPDATES_CHANNEL_ID,
+        name: 'Aktualizacje',
+        description: 'Informacje o nowej wersji aplikacji',
+        importance: 5,
+        vibration: true,
+      });
+    }
+    await LocalNotifications.cancel({
+      notifications: [{ id: NEW_RELEASE_LOCAL_NOTIFICATION_ID }],
+    });
+    const extra: LibrusLocalNotificationReleaseExtraPayload = {
+      kind: LOCAL_NOTIFY_RELEASE_EXTRA_KIND,
+      openUrl: url,
+    };
+    const n: LocalNotificationSchema = {
+      title: 'Librus Client',
+      body: `Dostępna wersja ${t}. Dotknij, aby pobrać APK.`,
+      id: NEW_RELEASE_LOCAL_NOTIFICATION_ID,
+      channelId: APP_UPDATES_CHANNEL_ID,
+      schedule: { at: new Date(Date.now() + 150) },
+      extra,
+      autoCancel: true,
+    };
+    if (Capacitor.getPlatform() === 'ios') {
+      n.interruptionLevel = 'active';
+    }
+    await LocalNotifications.schedule({ notifications: [n] });
+  } catch (e) {
+    console.warn('[LocalNotify] notifyNewReleaseFromFcm:', e);
+  }
 }
 
 /**

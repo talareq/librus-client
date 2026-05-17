@@ -1,6 +1,6 @@
 /**
- * Minimalny serwer: zapisuje tokeny FCM z aplikacji i wysyła „budzik” (data message)
- * bez żadnych danych Librus — sync dzieje się tylko po stronie apki.
+ * Mały serwer: zapisuje tokeny FCM i wysyła komunikaty data-only (`/v1/wake`, `/v1/notify-version`).
+ * Sync Librus zawsze tylko na urządzeniu.
  *
  * Uruchomienie: npm install && API_SECRET=tajne GOOGLE_APPLICATION_CREDENTIALS=./service-account.json npm start
  *
@@ -19,6 +19,7 @@ const PORT = Number(process.env.PORT || 8787);
 const API_SECRET = process.env.API_SECRET || '';
 const TOKENS_FILE = process.env.TOKENS_FILE || path.join(__dirname, 'data', 'tokens.json');
 const WAKE_ACTION = 'librus_wake_sync';
+const NEW_VERSION_ACTION = 'librus_new_version';
 
 function bearer(req) {
   const h = req.headers.authorization;
@@ -84,6 +85,46 @@ function initFirebase() {
   );
 }
 
+/** Wszystkie wartości `data` muszą być stringami (wymóg FCM). */
+function stringifyData(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined || v === null) continue;
+    out[k] = String(v);
+  }
+  return out;
+}
+
+async function sendFcmDataToTokens(dataObj, apnsAlert) {
+  const tokens = loadTokens().map((x) => x.token);
+  if (!tokens.length) {
+    return { ok: false, error: 'Brak zarejestrowanych tokenów — uruchom apkę z włączonym remotePushWake.', targets: 0, sent: 0, failed: 0 };
+  }
+  const base = {
+    data: stringifyData(dataObj),
+    android: { priority: 'high' },
+    apns: {
+      headers: { 'apns-priority': '10' },
+      payload: {
+        aps: {
+          alert: apnsAlert,
+          sound: 'default',
+        },
+      },
+    },
+  };
+  const chunkSize = 400;
+  let sent = 0;
+  let failed = 0;
+  for (let i = 0; i < tokens.length; i += chunkSize) {
+    const chunk = tokens.slice(i, i + chunkSize);
+    const result = await admin.messaging().sendEachForMulticast({ ...base, tokens: chunk });
+    sent += result.successCount;
+    failed += result.failureCount;
+  }
+  return { ok: true, targets: tokens.length, sent, failed };
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
@@ -107,45 +148,54 @@ app.post('/v1/wake', requireAuth, async (_req, res) => {
   } catch (e) {
     return res.status(500).json({ error: String(e.message || e) });
   }
-  const tokens = loadTokens().map((x) => x.token);
-  if (!tokens.length) {
-    return res.status(409).json({ error: 'Brak zarejestrowanych tokenów — uruchom apkę z włączonym remotePushWake.' });
+  const result = await sendFcmDataToTokens(
+    { action: WAKE_ACTION },
+    { title: 'Librus Client', body: 'Synchronizacja na żądanie (FCM)' }
+  );
+  if (!result.ok) {
+    return res.status(409).json({ error: result.error });
   }
+  res.json({ ok: true, targets: result.targets, sent: result.sent, failed: result.failed, action: WAKE_ACTION });
+});
 
-  const base = {
-    data: { action: WAKE_ACTION },
-    android: {
-      priority: 'high',
-    },
-    apns: {
-      headers: { 'apns-priority': '10' },
-      payload: {
-        aps: {
-          alert: {
-            title: 'Librus Client',
-            body: 'Synchronizacja na żądanie (FCM)',
-          },
-          sound: 'default',
-        },
-      },
-    },
-  };
-
-  const chunkSize = 400;
-  let sent = 0;
-  let failed = 0;
-  for (let i = 0; i < tokens.length; i += chunkSize) {
-    const chunk = tokens.slice(i, i + chunkSize);
-    const result = await admin.messaging().sendEachForMulticast({ ...base, tokens: chunk });
-    sent += result.successCount;
-    failed += result.failureCount;
+/**
+ * Powiadom zarejestrowane urządzenia o nowym release (np. z GitHub Actions po `release: published`).
+ * Body JSON: { "tag": "v0.1.2", "releaseUrl": "https://github.com/.../releases/tag/v0.1.2" }
+ */
+app.post('/v1/notify-version', requireAuth, async (req, res) => {
+  try {
+    initFirebase();
+  } catch (e) {
+    return res.status(500).json({ error: String(e.message || e) });
   }
-
-  res.json({ ok: true, targets: tokens.length, sent, failed, action: WAKE_ACTION });
+  const { tag, releaseUrl } = req.body || {};
+  if (typeof tag !== 'string' || !tag.trim()) {
+    return res.status(400).json({ error: 'Wymagane pole tag (string), np. v0.1.0.' });
+  }
+  if (typeof releaseUrl !== 'string' || !releaseUrl.trim()) {
+    return res.status(400).json({ error: 'Wymagane pole releaseUrl (string) — link do strony release na GitHubie.' });
+  }
+  const t = tag.trim();
+  const result = await sendFcmDataToTokens(
+    { action: NEW_VERSION_ACTION, tag: t, releaseUrl: releaseUrl.trim() },
+    { title: 'Librus Client', body: `Nowa wersja ${t}` }
+  );
+  if (!result.ok) {
+    return res.status(409).json({ error: result.error });
+  }
+  res.json({
+    ok: true,
+    targets: result.targets,
+    sent: result.sent,
+    failed: result.failed,
+    action: NEW_VERSION_ACTION,
+    tag: t,
+  });
 });
 
 app.listen(PORT, () => {
   console.log(`librus-push-wake listening on :${PORT}`);
-  console.log('POST /v1/devices  — rejestracja tokena z aplikacji');
-  console.log('POST /v1/wake     — wyślij FCM (Authorization: Bearer API_SECRET)');
+  console.log('POST /v1/devices       — rejestracja tokena z aplikacji');
+  console.log('POST /v1/wake          — wyślij FCM wake/sync (Authorization: Bearer API_SECRET)');
+  console.log('POST /v1/notify-version — FCM „nowa wersja” (tag + releaseUrl w JSON)');
 });

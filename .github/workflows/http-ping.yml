@@ -2,14 +2,17 @@
 # Uruchomienie: Actions → „HTTP ping” → Run workflow.
 #
 # Konfiguracja:
-#   Repository → Settings → Secrets and variables → Actions → New repository secret
-#   - PING_URL   → pełny URL (np. https://api.example.com/v1/cron/check lub health)
+#   Repository → Settings → Secrets and variables → Actions
+#   - PING_URL          → pełny URL (np. https://twoj-vps/v1/wake lub /health)
+#   - LIBRUS_WAKE_BEARER → ten sam sekret co API_SECRET na backendzie (Authorization: Bearer …)
 # Opcjonalnie:
-#   - PING_METHOD → domyślnie GET; ustaw POST dla zapisów
-#   - PING_HEADERS → jedna linia nagłówków dla curl, np. Authorization: Bearer x\nX-App: librus
+#   - PING_HEADERS      → dodatkowe nagłówki (bez Authorization — to dodaje LIBRUS_WAKE_BEARER)
 #
 # Uwaga: To nie „budzi” aplikacji na telefonie — tylko wywołuje serwer w internecie.
 # Aby dotrzeć do urządzenia, backend musi np. wysłać FCM po takim wywołaniu.
+#
+# Dla backendu wake (`POST /v1/wake`): PING_URL + LIBRUS_WAKE_BEARER (+ opcjonalnie PING_HEADERS).
+# Harmonogram `schedule` zawsze używa POST (patrz krok „HTTP request”).
 
 name: HTTP ping
 
@@ -28,9 +31,9 @@ on:
           - HEAD
           - POST
         default: GET
-  # Odkomentuj, żeby cyklicznie pinguć (harmonogram w UTC):
-  # schedule:
-  #   - cron: "0 */6 * * *" # co 6 godzin
+  schedule:
+    # UTC: 06:00, 13:00, 18:00 — w PL zimą to ~07:00 / 14:00 / 19:00, latem ~08:00 / 15:00 / 20:00 (CET/CEST)
+    - cron: "0 6,13,18 * * *"
 
 permissions:
   contents: read
@@ -55,12 +58,17 @@ jobs:
 
       - name: HTTP request
         env:
-          METHOD: ${{ github.event.inputs.method || 'GET' }}
+          # Ręczne uruchomienie: wybrana metoda. Cron (schedule): zawsze POST — pod typowe POST /v1/wake.
+          METHOD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.method || 'POST' }}
+          LIBRUS_WAKE_BEARER: ${{ secrets.LIBRUS_WAKE_BEARER }}
           PING_HEADERS: ${{ secrets.PING_HEADERS }}
         run: |
           set -euo pipefail
           URL="${{ steps.target.outputs.url }}"
           EXTRA=()
+          if [ -n "${LIBRUS_WAKE_BEARER:-}" ]; then
+            EXTRA+=(-H "Authorization: Bearer $LIBRUS_WAKE_BEARER")
+          fi
           if [ -n "${PING_HEADERS:-}" ]; then
             while IFS= read -r line; do
               [ -z "$line" ] && continue

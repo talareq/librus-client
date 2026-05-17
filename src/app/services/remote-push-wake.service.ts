@@ -7,12 +7,16 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { LibrusAuthService } from './librus-auth';
 import { devLog } from '../utils/dev-log';
+import { notifyNewReleaseFromFcm } from '../utils/sync-local-notification';
 
 /**
  * Wartość pola `data.action` w komunikacie FCM wysyłanym przez backend (`/v1/wake`).
  * Backend nie przesyła ciasteczek Librus — tylko ten znacznik; sync leci wyłącznie na urządzeniu.
  */
 export const REMOTE_PUSH_WAKE_ACTION = 'librus_wake_sync';
+
+/** FCM z `POST /v1/notify-version` — informacja o nowym release (bez sync Librus). */
+export const REMOTE_PUSH_NEW_VERSION_ACTION = 'librus_new_version';
 
 @Injectable({ providedIn: 'root' })
 export class RemotePushWakeService {
@@ -90,6 +94,15 @@ export class RemotePushWakeService {
 
     const onData = (data: Record<string, unknown> | undefined) => {
       const action = data && typeof data['action'] === 'string' ? data['action'] : undefined;
+      if (action === REMOTE_PUSH_NEW_VERSION_ACTION) {
+        const tag = data && typeof data['tag'] === 'string' ? data['tag'].trim() : '';
+        const releaseUrl =
+          data && typeof data['releaseUrl'] === 'string' ? data['releaseUrl'].trim() : '';
+        if (tag && releaseUrl) {
+          void notifyNewReleaseFromFcm(tag, releaseUrl);
+        }
+        return;
+      }
       if (action !== REMOTE_PUSH_WAKE_ACTION) {
         return;
       }

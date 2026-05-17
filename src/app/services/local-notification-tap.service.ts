@@ -4,9 +4,11 @@ import { Capacitor } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { LocalNotifications, type ActionPerformed } from '@capacitor/local-notifications';
 import { Subject } from 'rxjs';
+import { Browser } from '@capacitor/browser';
 import {
   LOCAL_NOTIFY_EXTRA_KIND,
-  type LibrusLocalNotificationExtraPayload,
+  LOCAL_NOTIFY_RELEASE_EXTRA_KIND,
+  type LibrusLocalNotificationAnyExtra,
 } from '../utils/sync-local-notification';
 
 /**
@@ -41,7 +43,16 @@ export class LocalNotificationTapService {
   }
 
   private async onNotificationTapped(action: ActionPerformed): Promise<void> {
-    const extra = action.notification.extra as LibrusLocalNotificationExtraPayload | undefined;
+    const extra = action.notification.extra as LibrusLocalNotificationAnyExtra | undefined;
+    if (extra?.kind === LOCAL_NOTIFY_RELEASE_EXTRA_KIND) {
+      const url = extra.openUrl?.trim();
+      if (url) {
+        await this.ngZone.run(async () => {
+          await Browser.open({ url });
+        });
+      }
+      return;
+    }
     if (extra?.kind !== LOCAL_NOTIFY_EXTRA_KIND) {
       return;
     }

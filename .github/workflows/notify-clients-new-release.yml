@@ -1,0 +1,42 @@
+# Po opublikowaniu GitHub Release: wywołuje backend `POST /v1/notify-version`, który wysyła FCM
+# z akcją `librus_new_version`. Aplikacja (z włączonym `remotePushWake`) pokazuje lokalną notyfikację
+# i po tapnięciu otwiera stronę release (np. pobranie APK).
+#
+# Wymagane sekrety (Settings → Secrets and variables → Actions):
+#   LIBRUS_NOTIFY_VERSION_URL — pełny URL, np. https://twoj-serwer/v1/notify-version
+#   LIBRUS_WAKE_BEARER       — ten sam sekret co API_SECRET na backendzie (jak w „HTTP ping”)
+#
+# Bez sekretów krok kończy się ostrzeżeniem i nie blokuje release.
+
+name: Notify clients (new release)
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /v1/notify-version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          REL: ${{ github.event.release.html_url }}
+          NOTIFY_URL: ${{ secrets.LIBRUS_NOTIFY_VERSION_URL }}
+          LIBRUS_WAKE_BEARER: ${{ secrets.LIBRUS_WAKE_BEARER }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NOTIFY_URL:-}" ] || [ -z "${LIBRUS_WAKE_BEARER:-}" ]; then
+            echo "::warning::Brak LIBRUS_NOTIFY_VERSION_URL lub LIBRUS_WAKE_BEARER — pomijam FCM „nowa wersja”."
+            exit 0
+          fi
+          PAYLOAD="$(python3 -c 'import json,os; print(json.dumps({"tag":os.environ["TAG"],"releaseUrl":os.environ["REL"]}))')"
+          curl -fsS --max-time 60 -X POST "$NOTIFY_URL" \
+            -H "Authorization: Bearer $LIBRUS_WAKE_BEARER" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
+          echo ""
+          echo "OK: powiadomienie wersji wysłane do backendu."
