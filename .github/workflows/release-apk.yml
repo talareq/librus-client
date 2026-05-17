@@ -1,6 +1,9 @@
 # Buduje debug APK i dołącza do GitHub Release pod tagiem semver (np. v0.1.0).
 # Zasób ma stałą nazwę librus-client.apk → adres:
 # https://github.com/<owner>/<repo>/releases/latest/download/librus-client.apk
+# Uwaga: „latest” = ostatnie **opublikowane** release (tag), nie zawsze to samo co wersja
+# na gałęzi main (po „Bump version after release” na main bywa nowszy numer niż ostatni tag).
+# Poprawny URL: .../download/librus-client.apk (ukośnik po „download”, nie kropka).
 # (działa dopiero gdy istnieje co najmniej jedno opublikowane release).
 #
 # Sposoby uruchomienia:
@@ -96,7 +99,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.tag }}
+          draft: false
+          prerelease: false
+          make_latest: true
           files: librus-client.apk
+          fail_on_unmatched_files: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
