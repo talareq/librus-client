@@ -47,6 +47,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # google-services.json jest w .gitignore; bez niego Gradle nie włącza com.google.gms.google-services
+      # i Firebase nie startuje → crash w PushNotifications.register() (IllegalStateException).
+      - name: Firebase (google-services.json z sekretu)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+              echo "::warning::Fork PR — brak sekretów w runnerze; pomijam google-services.json."
+              exit 0
+            fi
+            echo "::error::Ustaw sekret FIREBASE_GOOGLE_SERVICES_JSON (Settings → Secrets → Actions): wklej całą zawartość pliku android/app/google-services.json z Firebase Console."
+            exit 1
+          fi
+          printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+
       - name: Wersjonowanie (CI)
         run: |
           V=$(node -p "require('./package.json').version")
