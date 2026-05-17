@@ -67,6 +67,10 @@ export async function notifyNewReleaseFromFcm(tag: string, releaseUrl: string): 
   try {
     const perm = await LocalNotifications.requestPermissions();
     if (perm.display !== 'granted') {
+      console.warn(
+        '[LocalNotify] notifyNewReleaseFromFcm: brak zgody display (ustawienia powiadomień aplikacji):',
+        perm.display
+      );
       return;
     }
     if (Capacitor.getPlatform() === 'android') {

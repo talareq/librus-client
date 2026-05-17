@@ -2,6 +2,7 @@ import { Injectable, NgZone } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Capacitor } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
@@ -49,15 +50,28 @@ export class RemotePushWakeService {
       return;
     }
 
-    if (!this.listenersAttached) {
-      await this.attachListeners(base, bearer);
-      this.listenersAttached = true;
-    }
-
+    // Kolejność jak w dokumentacji Capacitor: najpierw zgoda, potem listenery, na końcu register().
     const perm = await PushNotifications.requestPermissions();
     if (perm.receive !== 'granted') {
       console.warn('[RemotePushWake] Brak zgody na push:', perm.receive);
       return;
+    }
+
+    try {
+      const localPerm = await LocalNotifications.requestPermissions();
+      if (localPerm.display !== 'granted') {
+        console.warn(
+          '[RemotePushWake] LocalNotifications (banner „nowa wersja”) bez zgody display:',
+          localPerm.display
+        );
+      }
+    } catch (e) {
+      console.warn('[RemotePushWake] LocalNotifications.requestPermissions:', e);
+    }
+
+    if (!this.listenersAttached) {
+      await this.attachListeners(base, bearer);
+      this.listenersAttached = true;
     }
 
     try {
@@ -99,6 +113,18 @@ export class RemotePushWakeService {
       })
     );
 
+    const normalizeData = (raw: unknown): Record<string, unknown> | undefined => {
+      if (!raw || typeof raw !== 'object') {
+        return undefined;
+      }
+      const d = raw as Record<string, unknown>;
+      const inner = d['data'];
+      if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+        return inner as Record<string, unknown>;
+      }
+      return d;
+    };
+
     const onData = (data: Record<string, unknown> | undefined) => {
       const action = data && typeof data['action'] === 'string' ? data['action'] : undefined;
       if (action === REMOTE_PUSH_NEW_VERSION_ACTION) {
@@ -107,10 +133,15 @@ export class RemotePushWakeService {
           data && typeof data['releaseUrl'] === 'string' ? data['releaseUrl'].trim() : '';
         if (tag && releaseUrl) {
           void notifyNewReleaseFromFcm(tag, releaseUrl);
+        } else {
+          console.warn('[RemotePushWake] librus_new_version bez tag/releaseUrl:', { tag, releaseUrl });
         }
         return;
       }
       if (action !== REMOTE_PUSH_WAKE_ACTION) {
+        if (action) {
+          console.warn('[RemotePushWake] nieobsługiwane data.action:', action);
+        }
         return;
       }
       void this.runWakeSyncFromFcm();
@@ -118,13 +149,13 @@ export class RemotePushWakeService {
 
     this.handles.push(
       await PushNotifications.addListener('pushNotificationReceived', (n) => {
-        this.ngZone.run(() => onData(n.data));
+        this.ngZone.run(() => onData(normalizeData(n)));
       })
     );
 
     this.handles.push(
       await PushNotifications.addListener('pushNotificationActionPerformed', (e) => {
-        this.ngZone.run(() => onData(e.notification?.data));
+        this.ngZone.run(() => onData(normalizeData(e.notification)));
       })
     );
   }
